@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from contextlib import suppress
 from dataclasses import dataclass, field
 from os import fsdecode
@@ -23,6 +24,7 @@ class WatchFolder:
     """Monitor a directory and import newly created PDF documents."""
 
     watch_directory: Path
+    processed_directory: Path
     import_service: DocumentImportService
     _observer: BaseObserver = field(init=False, repr=False)
     _event_handler: _WatchFolderEventHandler = field(init=False, repr=False)
@@ -30,6 +32,7 @@ class WatchFolder:
 
     def __post_init__(self) -> None:
         self.watch_directory = self.watch_directory.expanduser().resolve()
+        self.processed_directory = self.processed_directory.expanduser().resolve()
         self._observer = Observer()
         self._event_handler = _WatchFolderEventHandler(self)
 
@@ -39,9 +42,11 @@ class WatchFolder:
         if self._started:
             return
         self.watch_directory.mkdir(parents=True, exist_ok=True)
+        self.processed_directory.mkdir(parents=True, exist_ok=True)
         self._observer.schedule(self._event_handler, str(self.watch_directory), recursive=False)
         self._observer.start()
         self._started = True
+        self._process_existing_files()
 
     def stop(self) -> None:
         """Stop monitoring the configured directory."""
@@ -63,7 +68,9 @@ class WatchFolder:
         if self._is_ignored(normalized_path):
             return None
 
-        return self.import_service.import_pdf(normalized_path)
+        case = self.import_service.import_pdf(normalized_path)
+        self._move_to_processed(normalized_path)
+        return case
 
     def _is_ignored(self, file_path: Path) -> bool:
         return (
@@ -74,6 +81,33 @@ class WatchFolder:
             or file_path.name.endswith(".part")
             or file_path.name.endswith(".partial")
         )
+
+    def _process_existing_files(self) -> None:
+        for file_path in sorted(self.watch_directory.iterdir()):
+            if not file_path.is_file():
+                continue
+            try:
+                self.process_path(file_path)
+            except Exception:
+                logger.exception("Failed to import existing document: %s", file_path)
+
+    def _move_to_processed(self, source_path: Path) -> None:
+        self.processed_directory.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source_path), str(self._next_processed_path(source_path)))
+
+    def _next_processed_path(self, source_path: Path) -> Path:
+        candidate = self.processed_directory / source_path.name
+        if not candidate.exists():
+            return candidate
+
+        suffix = source_path.suffix
+        stem = source_path.stem
+        index = 1
+        while True:
+            candidate = self.processed_directory / f"{stem}-{index}{suffix}"
+            if not candidate.exists():
+                return candidate
+            index += 1
 
 
 @dataclass(slots=True, eq=False)

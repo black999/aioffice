@@ -16,6 +16,7 @@ def test_app_settings_uses_default_values(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.database_path == settings.data_directory / "aioffice.db"
     assert settings.artifacts_directory == settings.data_directory / "artifacts"
     assert settings.incoming_directory == settings.data_directory / "incoming"
+    assert settings.processed_directory == settings.data_directory / "processed"
     assert settings.host == "127.0.0.1"
     assert settings.port == 8000
 
@@ -65,6 +66,14 @@ def test_app_settings_builds_incoming_directory(monkeypatch: pytest.MonkeyPatch,
     settings = AppSettings.from_environment()
 
     assert settings.incoming_directory == (tmp_path / "data").resolve() / "incoming"
+
+
+def test_app_settings_builds_processed_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("AIOFFICE_DATA_DIR", str(tmp_path / "data"))
+
+    settings = AppSettings.from_environment()
+
+    assert settings.processed_directory == (tmp_path / "data").resolve() / "processed"
 
 
 def test_app_settings_converts_port_to_integer(monkeypatch: pytest.MonkeyPatch) -> None:

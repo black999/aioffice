@@ -20,6 +20,7 @@ def _settings(tmp_path: Path) -> AppSettings:
         database_path=tmp_path / "configured-data" / "aioffice.db",
         artifacts_directory=tmp_path / "configured-data" / "artifacts",
         incoming_directory=tmp_path / "configured-data" / "incoming",
+        processed_directory=tmp_path / "configured-data" / "processed",
         host="127.0.0.1",
         port=8000,
     )
@@ -55,11 +56,31 @@ def test_lifespan_creates_incoming_directory_and_supports_import(tmp_path: Path)
         assert dashboard.status_code == 200
         assert "CASE-000001" in dashboard.text
         assert settings.artifacts_directory.exists()
+        assert settings.processed_directory.exists()
         artifact_files = list(settings.artifacts_directory.rglob("*.pdf"))
         assert len(artifact_files) == 1
+        assert not source_path.exists()
+        assert (settings.processed_directory / "offer.pdf").exists()
         assert workspace.status_code == 200
         assert "artifacts/" in workspace.text
         assert str(settings.data_directory) not in workspace.text
+
+
+def test_existing_pdf_is_imported_during_runtime_startup(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    settings.incoming_directory.mkdir(parents=True)
+    source_path = settings.incoming_directory / "offer.pdf"
+    source_path.write_bytes(b"offer")
+
+    with TestClient(create_app(settings)) as client:
+        dashboard = client.get("/")
+
+    assert dashboard.status_code == 200
+    assert "CASE-000001" in dashboard.text
+    artifact_files = list(settings.artifacts_directory.rglob("*.pdf"))
+    assert len(artifact_files) == 1
+    assert (settings.processed_directory / "offer.pdf").exists()
+    assert not source_path.exists()
 
 
 def test_non_pdf_is_ignored_by_runtime(tmp_path: Path) -> None:

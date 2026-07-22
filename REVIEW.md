@@ -32,10 +32,11 @@
 
 ## WatchFolder runtime
 
-- Source files remain in `incoming` after successful import.
-- Files already present before observer startup are not scanned yet.
-- There is no retry mechanism and no `failed/` directory yet.
+- There is no `failed/` directory yet.
+- There is no retry mechanism yet.
+- A move failure after a successful import can leave a saved case in SQLite while the source file remains in `incoming`.
 - Re-copying the same file into `incoming` can still trigger another import attempt path.
+- Storage deduplication does not yet mean full case deduplication across the whole workflow.
 - Dashboard updates still require a manual refresh.
 
 No architectural change proposed.

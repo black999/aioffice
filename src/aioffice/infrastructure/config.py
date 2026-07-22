@@ -15,6 +15,7 @@ class AppSettings:
     database_path: Path
     artifacts_directory: Path
     incoming_directory: Path
+    processed_directory: Path
     host: str
     port: int
 
@@ -39,6 +40,7 @@ class AppSettings:
             database_path=data_directory / "aioffice.db",
             artifacts_directory=data_directory / "artifacts",
             incoming_directory=data_directory / "incoming",
+            processed_directory=data_directory / "processed",
             host=host,
             port=port,
         )

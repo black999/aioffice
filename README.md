@@ -1,6 +1,6 @@
 # AI Office
 
-See docs/PROJECT.md first.
+See `docs/PROJECT.md` first.
 
 ## Runtime configuration
 
@@ -20,10 +20,11 @@ Data layout under `AIOFFICE_DATA_DIR`:
 
 ```text
 AIOFFICE_DATA_DIR/
-├── aioffice.db
-├── artifacts/
-├── incoming/
-└── .staging/
+|- aioffice.db
+|- artifacts/
+|- incoming/
+|- processed/
+`- .staging/
 ```
 
 Example on Ubuntu:
@@ -39,9 +40,10 @@ uv run aioffice
 ## Automatic import
 
 1. Start the application.
-2. Copy a PDF into `AIOFFICE_DATA_DIR/incoming`.
-3. The application creates a case and stores the artifact.
-4. Refresh the dashboard.
+2. The application scans PDF files already present in `AIOFFICE_DATA_DIR/incoming`.
+3. New PDF files are detected by the filesystem observer.
+4. Successfully imported files are moved to `AIOFFICE_DATA_DIR/processed`.
+5. Files that fail during import remain in `AIOFFICE_DATA_DIR/incoming`.
 
 Example on Ubuntu:
 

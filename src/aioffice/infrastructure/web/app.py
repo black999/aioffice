@@ -39,6 +39,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     )
     watch_folder = WatchFolder(
         watch_directory=settings.incoming_directory,
+        processed_directory=settings.processed_directory,
         import_service=import_service,
     )
 

@@ -14,6 +14,7 @@ def test_get_root_returns_http_200_and_displays_cases(tmp_path: Path, monkeypatc
         database_path=tmp_path / "configured-data" / "aioffice.db",
         artifacts_directory=tmp_path / "configured-data" / "artifacts",
         incoming_directory=tmp_path / "configured-data" / "incoming",
+        processed_directory=tmp_path / "configured-data" / "processed",
         host="127.0.0.1",
         port=8000,
     )
@@ -37,6 +38,7 @@ def test_get_case_workspace_returns_http_200_and_displays_case_workspace(
         database_path=tmp_path / "configured-data" / "aioffice.db",
         artifacts_directory=tmp_path / "configured-data" / "artifacts",
         incoming_directory=tmp_path / "configured-data" / "incoming",
+        processed_directory=tmp_path / "configured-data" / "processed",
         host="127.0.0.1",
         port=8000,
     )
@@ -63,6 +65,7 @@ def test_get_case_workspace_displays_artifact(tmp_path: Path, monkeypatch: pytes
         database_path=tmp_path / "configured-data" / "aioffice.db",
         artifacts_directory=tmp_path / "configured-data" / "artifacts",
         incoming_directory=tmp_path / "configured-data" / "incoming",
+        processed_directory=tmp_path / "configured-data" / "processed",
         host="127.0.0.1",
         port=8000,
     )
@@ -94,6 +97,7 @@ def test_get_case_workspace_returns_404_for_missing_case(
         database_path=tmp_path / "configured-data" / "aioffice.db",
         artifacts_directory=tmp_path / "configured-data" / "artifacts",
         incoming_directory=tmp_path / "configured-data" / "incoming",
+        processed_directory=tmp_path / "configured-data" / "processed",
         host="127.0.0.1",
         port=8000,
     )
@@ -111,6 +115,7 @@ def test_get_case_workspace_returns_404_for_invalid_identifier(
         database_path=tmp_path / "configured-data" / "aioffice.db",
         artifacts_directory=tmp_path / "configured-data" / "artifacts",
         incoming_directory=tmp_path / "configured-data" / "incoming",
+        processed_directory=tmp_path / "configured-data" / "processed",
         host="127.0.0.1",
         port=8000,
     )
@@ -126,6 +131,7 @@ def test_create_app_uses_passed_database_path(tmp_path: Path) -> None:
         database_path=tmp_path / "first-data" / "aioffice.db",
         artifacts_directory=tmp_path / "first-data" / "artifacts",
         incoming_directory=tmp_path / "first-data" / "incoming",
+        processed_directory=tmp_path / "first-data" / "processed",
         host="127.0.0.1",
         port=8000,
     )
@@ -147,6 +153,7 @@ def test_web_app_works_independently_of_current_working_directory(
         database_path=tmp_path / "configured-data" / "aioffice.db",
         artifacts_directory=tmp_path / "configured-data" / "artifacts",
         incoming_directory=tmp_path / "configured-data" / "incoming",
+        processed_directory=tmp_path / "configured-data" / "processed",
         host="127.0.0.1",
         port=8000,
     )
@@ -171,6 +178,7 @@ def test_dashboard_and_case_workspace_use_same_configured_database(
         database_path=tmp_path / "configured-data" / "aioffice.db",
         artifacts_directory=tmp_path / "configured-data" / "artifacts",
         incoming_directory=tmp_path / "configured-data" / "incoming",
+        processed_directory=tmp_path / "configured-data" / "processed",
         host="127.0.0.1",
         port=8000,
     )
