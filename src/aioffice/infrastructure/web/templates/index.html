@@ -23,7 +23,7 @@
                 {% for case in cases %}
                 <tr>
                     <td>{{ case.status }}</td>
-                    <td><code>{{ case.case_reference }}</code></td>
+                    <td><a href="/cases/{{ case.case_id }}"><code>{{ case.case_reference }}</code></a></td>
                 </tr>
                 {% else %}
                 <tr>

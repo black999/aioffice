@@ -37,6 +37,8 @@ def test_case_dashboard_service_returns_case_count_and_summaries() -> None:
     cases = service.list_cases()
 
     assert service.count_cases() == 2
+    assert cases[0].case_id == str(first_case.id)
     assert cases[0].case_reference == "CASE-000001"
     assert cases[0].status == "open"
+    assert cases[1].case_id == str(second_case.id)
     assert cases[1].case_reference == "CASE-000002"

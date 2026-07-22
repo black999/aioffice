@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ page_title }}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+</head>
+<body>
+    <main class="container">
+        <p><a href="/">Back to cases</a></p>
+        <h1>{{ workspace.case_reference }}</h1>
+
+        <section>
+            <h2>Status</h2>
+            <p>{{ workspace.status }}</p>
+        </section>
+
+        <section>
+            <h2>Created</h2>
+            <p>{{ workspace.created_at }}</p>
+        </section>
+
+        <section>
+            <h2>Artifacts</h2>
+            {% if workspace.artifacts %}
+            <ul>
+                {% for artifact in workspace.artifacts %}
+                <li>{{ artifact.artifact_type }} — {{ artifact.locator }}</li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p>No artifacts</p>
+            {% endif %}
+        </section>
+
+        <section>
+            <h2>History</h2>
+            <ul>
+                {% for entry in workspace.history %}
+                <li>{{ entry.title }} — {{ entry.timestamp }}</li>
+                {% endfor %}
+            </ul>
+        </section>
+    </main>
+</body>
+</html>

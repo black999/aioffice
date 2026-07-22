@@ -12,6 +12,7 @@ from aioffice.application.case_numbers import format_case_reference
 class CaseSummary:
     """Minimal read model for displaying a case."""
 
+    case_id: str
     case_reference: str
     status: str
 
@@ -27,6 +28,7 @@ class CaseDashboardService:
 
         return tuple(
             CaseSummary(
+                case_id=str(persisted_case.case.id),
                 case_reference=format_case_reference(persisted_case.reference_number),
                 status=persisted_case.status,
             )
