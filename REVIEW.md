@@ -2,8 +2,8 @@
 
 ## Things noticed
 
-- Current `FilesystemStorage` implementation keeps the storage root convention inside infrastructure code. If more storage backends appear later, a shared application-level contract may become useful.
+- `SQLiteCaseRepository` currently reconstructs `Case` with only its identifier because artifact persistence is explicitly out of scope. This keeps the persistence step small, but it means a reloaded case is not yet a full aggregate.
 
-- Duplicate detection currently treats content hash as the source of truth and keeps the first stored extension. This is simple and deterministic for Sprint 3, but it may require an explicit product decision later if filename metadata becomes important.
+- `status` and `created_at` are stored in SQLite as repository-owned metadata because the current `Case` domain model does not expose those fields. This is acceptable for the current issue, but those fields should eventually become an explicit application or domain decision.
 
 No architectural change proposed.

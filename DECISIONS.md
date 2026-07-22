@@ -1,11 +1,11 @@
-# Sprint 3 decisions
+# Persistence decisions
 
-- SHA-256 chosen as the storage key for deterministic content addressing and duplicate detection.
+- `sqlite3` from the Python standard library chosen to keep persistence local, simple, and dependency-free.
 
-- Streaming file copy and hashing used to support large files without loading them fully into RAM.
+- A single database file at `storage/aioffice.db` is the default persistence target for this stage.
 
-- Two-level directory structure based on the first four hash characters chosen to avoid overly large flat directories.
+- The first repository persists only `Case` rows, while artifact persistence remains out of scope.
 
-- `StorageReference` returned with provider `filesystem` and a relative locator rooted under `storage/`.
+- SQL is written manually with parameterized statements only; no ORM or SQLAlchemy layer was introduced.
 
-- First stored file instance is preserved for duplicate content, and subsequent duplicates reuse the existing `StorageReference`.
+- The `cases` table stores `id`, `status`, and `created_at` as an extendable base schema.
