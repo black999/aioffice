@@ -4,16 +4,23 @@ import pytest
 from fastapi.testclient import TestClient
 
 from aioffice.domain import Artifact, ArtifactType, Case, Identifier, StorageReference
-from aioffice.infrastructure import SQLiteCaseRepository
+from aioffice.infrastructure import AppSettings, SQLiteCaseRepository
 from aioffice.infrastructure.web.app import create_app
 
 
 def test_get_root_returns_http_200_and_displays_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    repository = SQLiteCaseRepository(database_path=tmp_path / "storage" / "aioffice.db")
+    settings = AppSettings(
+        data_directory=tmp_path / "configured-data",
+        database_path=tmp_path / "configured-data" / "aioffice.db",
+        artifacts_directory=tmp_path / "configured-data" / "artifacts",
+        incoming_directory=tmp_path / "configured-data" / "incoming",
+        host="127.0.0.1",
+        port=8000,
+    )
+    repository = SQLiteCaseRepository(database_path=settings.database_path)
     repository.save(Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")), reference_number=1)
     repository.close()
-    client = TestClient(create_app())
+    client = TestClient(create_app(settings))
 
     response = client.get("/")
 
@@ -26,12 +33,19 @@ def test_get_root_returns_http_200_and_displays_cases(tmp_path: Path, monkeypatc
 def test_get_case_workspace_returns_http_200_and_displays_case_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.chdir(tmp_path)
-    repository = SQLiteCaseRepository(database_path=tmp_path / "storage" / "aioffice.db")
+    settings = AppSettings(
+        data_directory=tmp_path / "configured-data",
+        database_path=tmp_path / "configured-data" / "aioffice.db",
+        artifacts_directory=tmp_path / "configured-data" / "artifacts",
+        incoming_directory=tmp_path / "configured-data" / "incoming",
+        host="127.0.0.1",
+        port=8000,
+    )
+    repository = SQLiteCaseRepository(database_path=settings.database_path)
     case = Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
     repository.save(case, reference_number=1)
     repository.close()
-    client = TestClient(create_app())
+    client = TestClient(create_app(settings))
 
     response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 
@@ -46,8 +60,15 @@ def test_get_case_workspace_returns_http_200_and_displays_case_workspace(
 
 
 def test_get_case_workspace_displays_artifact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.chdir(tmp_path)
-    repository = SQLiteCaseRepository(database_path=tmp_path / "storage" / "aioffice.db")
+    settings = AppSettings(
+        data_directory=tmp_path / "configured-data",
+        database_path=tmp_path / "configured-data" / "aioffice.db",
+        artifacts_directory=tmp_path / "configured-data" / "artifacts",
+        incoming_directory=tmp_path / "configured-data" / "incoming",
+        host="127.0.0.1",
+        port=8000,
+    )
+    repository = SQLiteCaseRepository(database_path=settings.database_path)
     case = Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
     case.add_artifact(
         Artifact(
@@ -60,7 +81,7 @@ def test_get_case_workspace_displays_artifact(tmp_path: Path, monkeypatch: pytes
     )
     repository.save(case, reference_number=1)
     repository.close()
-    client = TestClient(create_app())
+    client = TestClient(create_app(settings))
 
     response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 
@@ -71,8 +92,15 @@ def test_get_case_workspace_displays_artifact(tmp_path: Path, monkeypatch: pytes
 def test_get_case_workspace_returns_404_for_missing_case(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.chdir(tmp_path)
-    client = TestClient(create_app())
+    settings = AppSettings(
+        data_directory=tmp_path / "configured-data",
+        database_path=tmp_path / "configured-data" / "aioffice.db",
+        artifacts_directory=tmp_path / "configured-data" / "artifacts",
+        incoming_directory=tmp_path / "configured-data" / "incoming",
+        host="127.0.0.1",
+        port=8000,
+    )
+    client = TestClient(create_app(settings))
 
     response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 
@@ -82,9 +110,89 @@ def test_get_case_workspace_returns_404_for_missing_case(
 def test_get_case_workspace_returns_404_for_invalid_identifier(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.chdir(tmp_path)
-    client = TestClient(create_app())
+    settings = AppSettings(
+        data_directory=tmp_path / "configured-data",
+        database_path=tmp_path / "configured-data" / "aioffice.db",
+        artifacts_directory=tmp_path / "configured-data" / "artifacts",
+        incoming_directory=tmp_path / "configured-data" / "incoming",
+        host="127.0.0.1",
+        port=8000,
+    )
+    client = TestClient(create_app(settings))
 
     response = client.get("/cases/not-a-uuid")
 
     assert response.status_code == 404
+
+
+def test_create_app_uses_passed_database_path(tmp_path: Path) -> None:
+    settings = AppSettings(
+        data_directory=tmp_path / "first-data",
+        database_path=tmp_path / "first-data" / "aioffice.db",
+        artifacts_directory=tmp_path / "first-data" / "artifacts",
+        incoming_directory=tmp_path / "first-data" / "incoming",
+        host="127.0.0.1",
+        port=8000,
+    )
+    repository = SQLiteCaseRepository(database_path=settings.database_path)
+    repository.save(Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")), reference_number=1)
+    repository.close()
+    client = TestClient(create_app(settings))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "CASE-000001" in response.text
+
+
+def test_web_app_works_independently_of_current_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = AppSettings(
+        data_directory=tmp_path / "configured-data",
+        database_path=tmp_path / "configured-data" / "aioffice.db",
+        artifacts_directory=tmp_path / "configured-data" / "artifacts",
+        incoming_directory=tmp_path / "configured-data" / "incoming",
+        host="127.0.0.1",
+        port=8000,
+    )
+    repository = SQLiteCaseRepository(database_path=settings.database_path)
+    repository.save(Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")), reference_number=1)
+    repository.close()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    client = TestClient(create_app(settings))
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "CASE-000001" in response.text
+
+
+def test_dashboard_and_case_workspace_use_same_configured_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = AppSettings(
+        data_directory=tmp_path / "configured-data",
+        database_path=tmp_path / "configured-data" / "aioffice.db",
+        artifacts_directory=tmp_path / "configured-data" / "artifacts",
+        incoming_directory=tmp_path / "configured-data" / "incoming",
+        host="127.0.0.1",
+        port=8000,
+    )
+    repository = SQLiteCaseRepository(database_path=settings.database_path)
+    repository.save(Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")), reference_number=1)
+    repository.close()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    client = TestClient(create_app(settings))
+
+    dashboard_response = client.get("/")
+    workspace_response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    assert dashboard_response.status_code == 200
+    assert workspace_response.status_code == 200
+    assert "CASE-000001" in dashboard_response.text
+    assert "CASE-000001" in workspace_response.text
