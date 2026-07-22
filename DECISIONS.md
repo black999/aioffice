@@ -1,11 +1,11 @@
-# Persistence decisions
+# Web Bootstrap decisions
 
-- `sqlite3` from the Python standard library chosen to keep persistence local, simple, and dependency-free.
+- FastAPI was chosen as the minimal server entrypoint, with a single `GET /` route.
 
-- A single database file at `storage/aioffice.db` is the default persistence target for this stage.
+- Jinja2 renders the HTML directly, keeping the first web interface server-side and read-only.
 
-- The first repository persists only `Case` rows, while artifact persistence remains out of scope.
+- PicoCSS is loaded from CDN to keep styling minimal without adding local asset tooling.
 
-- SQL is written manually with parameterized statements only; no ORM or SQLAlchemy layer was introduced.
+- HTMX is included from CDN to align with the frontend direction, even though the first page is static.
 
-- The `cases` table stores `id`, `status`, and `created_at` as an extendable base schema.
+- A small application service provides dashboard data so FastAPI does not query the repository directly.
