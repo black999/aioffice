@@ -9,7 +9,13 @@ from dataclasses import dataclass, field
 from os import fsdecode
 from pathlib import Path
 
-from watchdog.events import DirCreatedEvent, FileCreatedEvent, FileSystemEventHandler
+from watchdog.events import (
+    DirCreatedEvent,
+    DirModifiedEvent,
+    FileCreatedEvent,
+    FileModifiedEvent,
+    FileSystemEventHandler,
+)
 from watchdog.observers import Observer
 from watchdog.observers.api import BaseObserver
 
@@ -118,6 +124,17 @@ class _WatchFolderEventHandler(FileSystemEventHandler):
 
     def on_created(self, event: DirCreatedEvent | FileCreatedEvent) -> None:
         """Handle newly created filesystem entries."""
+
+        if event.is_directory:
+            return
+        file_path = Path(fsdecode(event.src_path))
+        try:
+            self.watch_folder.process_path(file_path)
+        except Exception:
+            logger.exception("Failed to import document: %s", file_path)
+
+    def on_modified(self, event: DirModifiedEvent | FileModifiedEvent) -> None:
+        """Handle modified filesystem entries."""
 
         if event.is_directory:
             return

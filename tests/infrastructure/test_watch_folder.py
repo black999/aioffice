@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from watchdog.events import FileCreatedEvent
+from watchdog.events import FileModifiedEvent
 
 from aioffice.application import CaseFactory
 from aioffice.application.services import DocumentImportService
@@ -291,5 +293,34 @@ def test_move_error_leaves_file_in_incoming(tmp_path: Path, monkeypatch: pytest.
 
     assert source_path.exists()
     assert repository.count() == 1
+    number_provider.close()
+    repository.close()
+
+
+def test_modified_event_retries_import_after_initial_permission_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    watch_directory = tmp_path / "incoming"
+    watch_directory.mkdir()
+    source_path = watch_directory / "Eksport.pdf"
+    source_path.write_bytes(b"offer")
+    watch_folder, repository, number_provider = _build_watch_folder(tmp_path, watch_directory)
+    calls = {"count": 0}
+    original_process_path = WatchFolder.process_path
+
+    def process_path(self: WatchFolder, file_path: Path) -> Case | None:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise PermissionError(f"[Errno 13] Permission denied: '{file_path}'")
+        return original_process_path(self, file_path)
+
+    monkeypatch.setattr(WatchFolder, "process_path", process_path)
+
+    watch_folder._event_handler.on_created(FileCreatedEvent(str(source_path)))
+    watch_folder._event_handler.on_modified(FileModifiedEvent(str(source_path)))
+
+    assert repository.count() == 1
+    assert not source_path.exists()
+    assert (tmp_path / "processed" / "Eksport.pdf").exists()
     number_provider.close()
     repository.close()
