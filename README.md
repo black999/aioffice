@@ -35,3 +35,26 @@ export AIOFFICE_PORT=8000
 
 uv run aioffice
 ```
+
+## Automatic import
+
+1. Start the application.
+2. Copy a PDF into `AIOFFICE_DATA_DIR/incoming`.
+3. The application creates a case and stores the artifact.
+4. Refresh the dashboard.
+
+Example on Ubuntu:
+
+```bash
+export AIOFFICE_DATA_DIR=/home/irek/aioffice-data
+export AIOFFICE_HOST=0.0.0.0
+export AIOFFICE_PORT=8000
+
+uv run aioffice
+```
+
+In another terminal:
+
+```bash
+cp przykladowy.pdf /home/irek/aioffice-data/incoming/
+```

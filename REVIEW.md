@@ -30,4 +30,12 @@
 
 - `FilesystemStorage` now treats `root_directory` as the direct application data directory. Existing developer data under `data_directory/storage/artifacts/` would require a manual move to `data_directory/artifacts/` after this change.
 
+## WatchFolder runtime
+
+- Source files remain in `incoming` after successful import.
+- Files already present before observer startup are not scanned yet.
+- There is no retry mechanism and no `failed/` directory yet.
+- Re-copying the same file into `incoming` can still trigger another import attempt path.
+- Dashboard updates still require a manual refresh.
+
 No architectural change proposed.

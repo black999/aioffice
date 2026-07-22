@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from contextlib import suppress
 from dataclasses import dataclass, field
 from os import fsdecode
 from pathlib import Path
@@ -13,6 +15,8 @@ from watchdog.observers.api import BaseObserver
 from aioffice.application.services import DocumentImportService
 from aioffice.domain import Case
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(slots=True)
 class WatchFolder:
@@ -22,6 +26,7 @@ class WatchFolder:
     import_service: DocumentImportService
     _observer: BaseObserver = field(init=False, repr=False)
     _event_handler: _WatchFolderEventHandler = field(init=False, repr=False)
+    _started: bool = field(init=False, default=False, repr=False)
 
     def __post_init__(self) -> None:
         self.watch_directory = self.watch_directory.expanduser().resolve()
@@ -31,15 +36,23 @@ class WatchFolder:
     def start(self) -> None:
         """Start monitoring the configured directory."""
 
+        if self._started:
+            return
         self.watch_directory.mkdir(parents=True, exist_ok=True)
         self._observer.schedule(self._event_handler, str(self.watch_directory), recursive=False)
         self._observer.start()
+        self._started = True
 
     def stop(self) -> None:
         """Stop monitoring the configured directory."""
 
+        if not self._started:
+            return
         self._observer.stop()
-        self._observer.join()
+        with suppress(RuntimeError):
+            if self._observer.is_alive():
+                self._observer.join()
+        self._started = False
 
     def process_path(self, file_path: Path) -> Case | None:
         """Import a newly created PDF file if it is supported."""
@@ -63,7 +76,7 @@ class WatchFolder:
         )
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, eq=False)
 class _WatchFolderEventHandler(FileSystemEventHandler):
     """Bridge filesystem events to the watch-folder service."""
 
@@ -74,4 +87,8 @@ class _WatchFolderEventHandler(FileSystemEventHandler):
 
         if event.is_directory:
             return
-        self.watch_folder.process_path(Path(fsdecode(event.src_path)))
+        file_path = Path(fsdecode(event.src_path))
+        try:
+            self.watch_folder.process_path(file_path)
+        except Exception:
+            logger.exception("Failed to import document: %s", file_path)

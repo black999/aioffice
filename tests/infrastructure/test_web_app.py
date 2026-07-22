@@ -20,9 +20,8 @@ def test_get_root_returns_http_200_and_displays_cases(tmp_path: Path, monkeypatc
     repository = SQLiteCaseRepository(database_path=settings.database_path)
     repository.save(Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")), reference_number=1)
     repository.close()
-    client = TestClient(create_app(settings))
-
-    response = client.get("/")
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/")
 
     assert response.status_code == 200
     assert "AI Office" in response.text
@@ -45,9 +44,8 @@ def test_get_case_workspace_returns_http_200_and_displays_case_workspace(
     case = Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
     repository.save(case, reference_number=1)
     repository.close()
-    client = TestClient(create_app(settings))
-
-    response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 
     assert response.status_code == 200
     assert "CASE-000001" in response.text
@@ -81,9 +79,8 @@ def test_get_case_workspace_displays_artifact(tmp_path: Path, monkeypatch: pytes
     )
     repository.save(case, reference_number=1)
     repository.close()
-    client = TestClient(create_app(settings))
-
-    response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 
     assert response.status_code == 200
     assert "PDF — artifacts/aa/bb/document.pdf" in response.text
@@ -100,9 +97,8 @@ def test_get_case_workspace_returns_404_for_missing_case(
         host="127.0.0.1",
         port=8000,
     )
-    client = TestClient(create_app(settings))
-
-    response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 
     assert response.status_code == 404
 
@@ -118,9 +114,8 @@ def test_get_case_workspace_returns_404_for_invalid_identifier(
         host="127.0.0.1",
         port=8000,
     )
-    client = TestClient(create_app(settings))
-
-    response = client.get("/cases/not-a-uuid")
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/not-a-uuid")
 
     assert response.status_code == 404
 
@@ -137,9 +132,8 @@ def test_create_app_uses_passed_database_path(tmp_path: Path) -> None:
     repository = SQLiteCaseRepository(database_path=settings.database_path)
     repository.save(Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")), reference_number=1)
     repository.close()
-    client = TestClient(create_app(settings))
-
-    response = client.get("/")
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/")
 
     assert response.status_code == 200
     assert "CASE-000001" in response.text
@@ -162,9 +156,8 @@ def test_web_app_works_independently_of_current_working_directory(
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
-    client = TestClient(create_app(settings))
-
-    response = client.get("/")
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/")
 
     assert response.status_code == 200
     assert "CASE-000001" in response.text
@@ -187,10 +180,9 @@ def test_dashboard_and_case_workspace_use_same_configured_database(
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
-    client = TestClient(create_app(settings))
-
-    dashboard_response = client.get("/")
-    workspace_response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    with TestClient(create_app(settings)) as client:
+        dashboard_response = client.get("/")
+        workspace_response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 
     assert dashboard_response.status_code == 200
     assert workspace_response.status_code == 200
