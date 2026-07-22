@@ -2,21 +2,32 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from aioffice.domain import Case, Identifier
 
 
+@dataclass(frozen=True, slots=True)
+class PersistedCase:
+    """Case plus persistence metadata needed by the application layer."""
+
+    case: Case
+    reference_number: int
+    status: str
+    created_at: str
+
+
 class CaseRepository(Protocol):
     """Persistence contract for cases."""
 
-    def save(self, case: Case) -> None:
+    def save(self, case: Case, reference_number: int) -> None:
         """Persist a case."""
 
-    def get(self, case_id: Identifier) -> Case | None:
+    def get(self, case_id: Identifier) -> PersistedCase | None:
         """Load a case by identifier."""
 
-    def list(self) -> tuple[Case, ...]:
+    def list(self) -> tuple[PersistedCase, ...]:
         """List all persisted cases."""
 
     def count(self) -> int:

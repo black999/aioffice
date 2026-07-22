@@ -16,14 +16,14 @@
             <thead>
                 <tr>
                     <th scope="col">Status</th>
-                    <th scope="col">Case ID</th>
+                    <th scope="col">Case</th>
                 </tr>
             </thead>
             <tbody>
                 {% for case in cases %}
                 <tr>
                     <td>{{ case.status }}</td>
-                    <td><code>{{ case.case_id }}</code></td>
+                    <td><code>{{ case.case_reference }}</code></td>
                 </tr>
                 {% else %}
                 <tr>

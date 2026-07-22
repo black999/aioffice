@@ -20,4 +20,10 @@
 
 - `CaseDashboardService` currently supplies a default `"open"` status because status is not yet exposed as a real read model from persistence. That keeps the page minimal, but it should be replaced once case status becomes explicit in the application model.
 
+## Case reference number
+
+- `SQLiteCaseRepository` now persists `reference_number`, but the allocation logic is intentionally separate in `SQLiteCaseNumberProvider`. This keeps business numbering out of the repository, at the cost of coordinating two infrastructure components during document import.
+
+- Artifact persistence is still partial. The repository stores only a primary artifact locator so the dashboard and duplicate detection can survive restart, but full artifact persistence is still deferred.
+
 No architectural change proposed.

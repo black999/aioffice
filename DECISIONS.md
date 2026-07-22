@@ -1,11 +1,11 @@
-# Web Bootstrap decisions
+# Case Reference Number decisions
 
-- FastAPI was chosen as the minimal server entrypoint, with a single `GET /` route.
+- Business reference numbers use an integer sequence and are formatted for users as `CASE-000001`.
 
-- Jinja2 renders the HTML directly, keeping the first web interface server-side and read-only.
+- UUID remains the internal technical identifier of `Case` and is not shown in the dashboard.
 
-- PicoCSS is loaded from CDN to keep styling minimal without adding local asset tooling.
+- Number allocation belongs to Application through `CaseNumberProvider`, while SQLite only persists the assigned number.
 
-- HTMX is included from CDN to align with the frontend direction, even though the first page is static.
+- Formatting stays outside persistence so presentation can evolve without schema changes.
 
-- A small application service provides dashboard data so FastAPI does not query the repository directly.
+- `DocumentImportService` is the first application entrypoint responsible for assigning a case number before persistence.

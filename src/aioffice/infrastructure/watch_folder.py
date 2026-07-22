@@ -10,9 +10,8 @@ from watchdog.events import DirCreatedEvent, FileCreatedEvent, FileSystemEventHa
 from watchdog.observers import Observer
 from watchdog.observers.api import BaseObserver
 
-from aioffice.application import CaseFactory, InMemoryCaseRegistry
-from aioffice.domain import Artifact, ArtifactType, Case, StorageReference
-from aioffice.infrastructure.storage import FilesystemStorage
+from aioffice.application.services import DocumentImportService
+from aioffice.domain import Case
 
 
 @dataclass(slots=True)
@@ -20,9 +19,7 @@ class WatchFolder:
     """Monitor a directory and import newly created PDF documents."""
 
     watch_directory: Path
-    storage: FilesystemStorage
-    case_factory: CaseFactory
-    registry: InMemoryCaseRegistry
+    import_service: DocumentImportService
     _observer: BaseObserver = field(init=False, repr=False)
     _event_handler: _WatchFolderEventHandler = field(init=False, repr=False)
 
@@ -53,21 +50,7 @@ class WatchFolder:
         if self._is_ignored(normalized_path):
             return None
 
-        storage_reference = self.storage.store_file(normalized_path)
-        if self._contains_storage_reference(storage_reference):
-            return None
-
-        artifact = Artifact(artifact_type=ArtifactType.PDF, storage_reference=storage_reference)
-        case = self.case_factory.create_from_artifact(artifact)
-        self.registry.add(case)
-        return case
-
-    def _contains_storage_reference(self, storage_reference: StorageReference) -> bool:
-        return any(
-            artifact.storage_reference == storage_reference
-            for case in self.registry.list()
-            for artifact in case.artifacts
-        )
+        return self.import_service.import_pdf(normalized_path)
 
     def _is_ignored(self, file_path: Path) -> bool:
         return (
