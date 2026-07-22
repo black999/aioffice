@@ -199,4 +199,30 @@ class SQLiteCaseNumberProvider(CaseNumberProvider):
             """,
             ("case_reference", 1),
         )
+        has_cases_table = self._connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?",
+            ("table", "cases"),
+        ).fetchone()
+        max_reference_number = 0
+        if has_cases_table is not None:
+            max_reference_number_row = self._connection.execute(
+                "SELECT MAX(reference_number) AS max_reference_number FROM cases",
+            ).fetchone()
+            max_reference_number = (
+                int(max_reference_number_row["max_reference_number"])
+                if max_reference_number_row is not None and max_reference_number_row["max_reference_number"] is not None
+                else 0
+            )
+        minimum_next_value = max_reference_number + 1
+        self._connection.execute(
+            """
+            UPDATE case_number_sequence
+            SET next_value = CASE
+                WHEN next_value < ? THEN ?
+                ELSE next_value
+            END
+            WHERE sequence_name = ?
+            """,
+            (minimum_next_value, minimum_next_value, "case_reference"),
+        )
         self._connection.commit()
