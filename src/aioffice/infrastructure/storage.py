@@ -29,7 +29,7 @@ class FilesystemStorage:
             msg = f"source path does not exist or is not a file: {source_path}"
             raise FileNotFoundError(msg)
 
-        staging_directory = self.root_directory / "storage" / ".staging"
+        staging_directory = self.root_directory / ".staging"
         staging_directory.mkdir(parents=True, exist_ok=True)
 
         with NamedTemporaryFile(dir=staging_directory, delete=False) as temporary_file:
@@ -42,7 +42,7 @@ class FilesystemStorage:
             if existing_reference is not None:
                 return existing_reference
 
-            target_path = self.root_directory / "storage" / locator
+            target_path = self.root_directory / locator
             target_path.parent.mkdir(parents=True, exist_ok=True)
             temporary_path.replace(target_path)
             return StorageReference(storage_name="filesystem", locator=locator.as_posix())
@@ -72,12 +72,12 @@ class FilesystemStorage:
         return Path("artifacts") / file_hash[:2] / file_hash[2:4] / filename
 
     def _find_existing_reference(self, file_hash: str) -> StorageReference | None:
-        bucket_directory = self.root_directory / "storage" / "artifacts" / file_hash[:2] / file_hash[2:4]
+        bucket_directory = self.root_directory / "artifacts" / file_hash[:2] / file_hash[2:4]
         if not bucket_directory.exists():
             return None
 
         for candidate in bucket_directory.iterdir():
             if candidate.is_file() and candidate.stem == file_hash:
-                locator = candidate.relative_to(self.root_directory / "storage")
+                locator = candidate.relative_to(self.root_directory)
                 return StorageReference(storage_name="filesystem", locator=locator.as_posix())
         return None

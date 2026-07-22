@@ -16,6 +16,16 @@ Defaults:
 - `AIOFFICE_HOST=127.0.0.1`
 - `AIOFFICE_PORT=8000`
 
+Data layout under `AIOFFICE_DATA_DIR`:
+
+```text
+AIOFFICE_DATA_DIR/
+├── aioffice.db
+├── artifacts/
+├── incoming/
+└── .staging/
+```
+
 Example on Ubuntu:
 
 ```bash

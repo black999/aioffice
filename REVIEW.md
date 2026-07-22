@@ -26,4 +26,8 @@
 
 - Artifact persistence is still partial. The repository stores only a primary artifact locator so the dashboard and duplicate detection can survive restart, but full artifact persistence is still deferred.
 
+## Filesystem storage layout
+
+- `FilesystemStorage` now treats `root_directory` as the direct application data directory. Existing developer data under `data_directory/storage/artifacts/` would require a manual move to `data_directory/artifacts/` after this change.
+
 No architectural change proposed.
