@@ -156,3 +156,45 @@ def test_lifespan_closes_sqlite_resources_on_shutdown(tmp_path: Path, monkeypatc
 
     assert closed.count("repository") == 2
     assert closed.count("number_provider") == 1
+
+
+def test_lifespan_closes_resources_when_watch_folder_start_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(tmp_path)
+    calls: list[str] = []
+
+    from aioffice.infrastructure.sqlite_repository import SQLiteCaseNumberProvider, SQLiteCaseRepository
+    from aioffice.infrastructure.watch_folder import WatchFolder
+
+    def start(self: WatchFolder) -> None:
+        calls.append("start")
+        raise RuntimeError("watch start failed")
+
+    def stop(self: WatchFolder) -> None:
+        calls.append("stop")
+
+    original_repo_close = SQLiteCaseRepository.close
+    original_provider_close = SQLiteCaseNumberProvider.close
+
+    def repo_close(self: SQLiteCaseRepository) -> None:
+        calls.append("repository")
+        original_repo_close(self)
+
+    def provider_close(self: SQLiteCaseNumberProvider) -> None:
+        calls.append("number_provider")
+        original_provider_close(self)
+
+    monkeypatch.setattr(WatchFolder, "start", start)
+    monkeypatch.setattr(WatchFolder, "stop", stop)
+    monkeypatch.setattr(SQLiteCaseRepository, "close", repo_close)
+    monkeypatch.setattr(SQLiteCaseNumberProvider, "close", provider_close)
+
+    with pytest.raises(RuntimeError, match="watch start failed"):
+        with TestClient(create_app(settings)):
+            pass
+
+    assert calls.count("start") == 1
+    assert calls.count("stop") == 1
+    assert calls.count("repository") == 2
+    assert calls.count("number_provider") == 1

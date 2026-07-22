@@ -44,8 +44,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        watch_folder.start()
         try:
+            watch_folder.start()
             yield
         finally:
             watch_folder.stop()
