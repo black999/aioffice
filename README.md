@@ -74,6 +74,9 @@ export AIOFFICE_IMAP_USERNAME=user@example.com
 export AIOFFICE_IMAP_PASSWORD='secret'
 export AIOFFICE_IMAP_MAILBOX=INBOX
 export AIOFFICE_IMAP_USE_SSL=true
+export AIOFFICE_IMAP_POLLING_ENABLED=true
+export AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS=300
+export AIOFFICE_IMAP_POLLING_RUN_IMMEDIATELY=false
 ```
 
 Use a proper secret store for the IMAP password in production. Environment variables are only a temporary MVP mechanism.
@@ -86,3 +89,21 @@ Use a proper secret store for the IMAP password in production. Environment varia
 4. Click `Importuj pocztę`.
 
 The IMAP import is currently manual and synchronous. The HTTP request stays open until the import finishes.
+
+## Automatic IMAP polling
+
+Set the polling variables to enable automatic mailbox checks:
+
+- `AIOFFICE_IMAP_POLLING_ENABLED=true`
+- `AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS=300`
+- `AIOFFICE_IMAP_POLLING_RUN_IMMEDIATELY=false`
+
+Notes:
+
+- Polling is disabled by default.
+- The default interval is 300 seconds.
+- The minimum interval is 30 seconds.
+- `AIOFFICE_IMAP_POLLING_RUN_IMMEDIATELY=true` starts the first import cycle right after the poller thread starts.
+- The manual `Importuj pocztę` button still works.
+- The import lock protects only one application process instance.
+- Poll status is kept only in process memory and is lost after restart.

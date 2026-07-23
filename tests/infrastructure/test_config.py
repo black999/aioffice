@@ -15,6 +15,9 @@ def test_app_settings_uses_default_values(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.delenv("AIOFFICE_IMAP_PASSWORD", raising=False)
     monkeypatch.delenv("AIOFFICE_IMAP_MAILBOX", raising=False)
     monkeypatch.delenv("AIOFFICE_IMAP_USE_SSL", raising=False)
+    monkeypatch.delenv("AIOFFICE_IMAP_POLLING_ENABLED", raising=False)
+    monkeypatch.delenv("AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS", raising=False)
+    monkeypatch.delenv("AIOFFICE_IMAP_POLLING_RUN_IMMEDIATELY", raising=False)
 
     settings = AppSettings.from_environment()
 
@@ -31,6 +34,9 @@ def test_app_settings_uses_default_values(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.imap_password is None
     assert settings.imap_mailbox == "INBOX"
     assert settings.imap_use_ssl is True
+    assert settings.imap_polling_enabled is False
+    assert settings.imap_polling_interval_seconds == 300
+    assert settings.imap_polling_run_immediately is False
 
 
 def test_app_settings_reads_all_environment_variables(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -43,6 +49,9 @@ def test_app_settings_reads_all_environment_variables(monkeypatch: pytest.Monkey
     monkeypatch.setenv("AIOFFICE_IMAP_PASSWORD", "secret")
     monkeypatch.setenv("AIOFFICE_IMAP_MAILBOX", "Support")
     monkeypatch.setenv("AIOFFICE_IMAP_USE_SSL", "false")
+    monkeypatch.setenv("AIOFFICE_IMAP_POLLING_ENABLED", "true")
+    monkeypatch.setenv("AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS", "600")
+    monkeypatch.setenv("AIOFFICE_IMAP_POLLING_RUN_IMMEDIATELY", "true")
 
     settings = AppSettings.from_environment()
 
@@ -55,6 +64,9 @@ def test_app_settings_reads_all_environment_variables(monkeypatch: pytest.Monkey
     assert settings.imap_password == "secret"
     assert settings.imap_mailbox == "Support"
     assert settings.imap_use_ssl is False
+    assert settings.imap_polling_enabled is True
+    assert settings.imap_polling_interval_seconds == 600
+    assert settings.imap_polling_run_immediately is True
 
 
 def test_app_settings_expands_home_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -140,4 +152,81 @@ def test_app_settings_rejects_invalid_imap_ssl_flag(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("AIOFFICE_IMAP_USE_SSL", "maybe")
 
     with pytest.raises(ValueError, match="AIOFFICE_IMAP_USE_SSL must be 'true' or 'false'"):
+        AppSettings.from_environment()
+
+
+def test_app_settings_parses_false_imap_polling_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_POLLING_ENABLED", "false")
+
+    settings = AppSettings.from_environment()
+
+    assert settings.imap_polling_enabled is False
+
+
+def test_app_settings_rejects_invalid_imap_polling_enabled_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_POLLING_ENABLED", "maybe")
+
+    with pytest.raises(ValueError, match="AIOFFICE_IMAP_POLLING_ENABLED must be 'true' or 'false'"):
+        AppSettings.from_environment()
+
+
+def test_app_settings_allows_minimum_imap_polling_interval(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS", "30")
+
+    settings = AppSettings.from_environment()
+
+    assert settings.imap_polling_interval_seconds == 30
+
+
+def test_app_settings_allows_maximum_imap_polling_interval(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS", "86400")
+
+    settings = AppSettings.from_environment()
+
+    assert settings.imap_polling_interval_seconds == 86400
+
+
+def test_app_settings_rejects_imap_polling_interval_below_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS", "29")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS must be between 30 and 86400",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_imap_polling_interval_above_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS", "86401")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS must be between 30 and 86400",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_parses_imap_polling_run_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_POLLING_RUN_IMMEDIATELY", "true")
+
+    settings = AppSettings.from_environment()
+
+    assert settings.imap_polling_run_immediately is True
+
+
+def test_app_settings_rejects_invalid_imap_polling_run_immediately_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_POLLING_RUN_IMMEDIATELY", "sometimes")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_IMAP_POLLING_RUN_IMMEDIATELY must be 'true' or 'false'",
+    ):
         AppSettings.from_environment()

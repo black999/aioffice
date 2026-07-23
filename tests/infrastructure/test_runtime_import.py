@@ -26,6 +26,24 @@ def _settings(tmp_path: Path) -> AppSettings:
     )
 
 
+def _imap_polling_settings(tmp_path: Path) -> AppSettings:
+    return AppSettings(
+        data_directory=tmp_path / "configured-data",
+        database_path=tmp_path / "configured-data" / "aioffice.db",
+        artifacts_directory=tmp_path / "configured-data" / "artifacts",
+        incoming_directory=tmp_path / "configured-data" / "incoming",
+        processed_directory=tmp_path / "configured-data" / "processed",
+        host="127.0.0.1",
+        port=8000,
+        imap_host="imap.example.com",
+        imap_username="user@example.com",
+        imap_password="secret",
+        imap_polling_enabled=True,
+        imap_polling_interval_seconds=30,
+        imap_polling_run_immediately=False,
+    )
+
+
 def wait_until(predicate: Callable[[], bool], timeout: float = 2.0, interval: float = 0.05) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -264,3 +282,68 @@ def test_lifespan_closes_resources_when_watch_folder_start_fails(
     assert calls.count("stop") == 1
     assert calls.count("repository") == 2
     assert calls.count("number_provider") == 1
+
+
+def test_polling_disabled_does_not_create_running_poller(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    app = create_app(settings)
+
+    assert app.state.mail_import_poller is None
+
+
+def test_lifespan_stops_mail_poller_before_closing_resources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _imap_polling_settings(tmp_path)
+    calls: list[str] = []
+
+    from aioffice.infrastructure.imported_mail_repository import SQLiteImportedMailRepository
+    from aioffice.infrastructure.mail_poller import MailImportPoller
+    from aioffice.infrastructure.sqlite_repository import SQLiteCaseNumberProvider, SQLiteCaseRepository
+    from aioffice.infrastructure.watch_folder import WatchFolder
+
+    original_poller_start = MailImportPoller.start
+    original_poller_stop = MailImportPoller.stop
+    original_watch_stop = WatchFolder.stop
+    original_imported_close = SQLiteImportedMailRepository.close
+    original_repo_close = SQLiteCaseRepository.close
+    original_provider_close = SQLiteCaseNumberProvider.close
+
+    def poller_start(self: MailImportPoller) -> None:
+        calls.append("poller_start")
+        original_poller_start(self)
+
+    def poller_stop(self: MailImportPoller) -> None:
+        calls.append("poller_stop")
+        original_poller_stop(self)
+
+    def watch_stop(self: WatchFolder) -> None:
+        calls.append("watch_stop")
+        original_watch_stop(self)
+
+    def imported_close(self: SQLiteImportedMailRepository) -> None:
+        calls.append("imported_close")
+        original_imported_close(self)
+
+    def repo_close(self: SQLiteCaseRepository) -> None:
+        calls.append("repository_close")
+        original_repo_close(self)
+
+    def provider_close(self: SQLiteCaseNumberProvider) -> None:
+        calls.append("number_provider_close")
+        original_provider_close(self)
+
+    monkeypatch.setattr(MailImportPoller, "start", poller_start)
+    monkeypatch.setattr(MailImportPoller, "stop", poller_stop)
+    monkeypatch.setattr(WatchFolder, "stop", watch_stop)
+    monkeypatch.setattr(SQLiteImportedMailRepository, "close", imported_close)
+    monkeypatch.setattr(SQLiteCaseRepository, "close", repo_close)
+    monkeypatch.setattr(SQLiteCaseNumberProvider, "close", provider_close)
+
+    with TestClient(create_app(settings)):
+        pass
+
+    assert calls.index("poller_stop") < calls.index("watch_stop")
+    assert calls.index("poller_stop") < calls.index("imported_close")
+    assert calls.index("poller_stop") < calls.index("repository_close")
+    assert calls.index("poller_stop") < calls.index("number_provider_close")

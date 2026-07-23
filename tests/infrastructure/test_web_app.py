@@ -2,15 +2,34 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 from aioffice.application import MailImportResult
 from aioffice.domain import Artifact, ArtifactType, Case, Identifier, StorageReference
-from aioffice.infrastructure import AppSettings, SQLiteCaseNumberProvider, SQLiteCaseRepository
+from aioffice.infrastructure import (
+    AppSettings,
+    MailImportPoller,
+    MailPollStatus,
+    SQLiteCaseNumberProvider,
+    SQLiteCaseRepository,
+)
 from aioffice.infrastructure.web.app import create_app
+
+
+def wait_until(predicate: Callable[[], bool], timeout: float = 1.0, interval: float = 0.01) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(interval)
+    msg = "Condition was not met before timeout"
+    raise AssertionError(msg)
 
 
 @dataclass(slots=True)
@@ -29,7 +48,23 @@ class _FakeMailImportService:
         return self.result
 
 
-def _settings(tmp_path: Path, *, with_imap: bool = False) -> AppSettings:
+@dataclass(slots=True)
+class _FakePoller:
+    interval_seconds: float
+    status: MailPollStatus
+
+    def get_status(self) -> MailPollStatus:
+        return self.status
+
+
+def _settings(
+    tmp_path: Path,
+    *,
+    with_imap: bool = False,
+    polling_enabled: bool = False,
+    polling_interval_seconds: int = 300,
+    polling_run_immediately: bool = False,
+) -> AppSettings:
     return AppSettings(
         data_directory=tmp_path / "configured-data",
         database_path=tmp_path / "configured-data" / "aioffice.db",
@@ -41,6 +76,9 @@ def _settings(tmp_path: Path, *, with_imap: bool = False) -> AppSettings:
         imap_host="imap.example.com" if with_imap else None,
         imap_username="user@example.com" if with_imap else None,
         imap_password="secret" if with_imap else None,
+        imap_polling_enabled=polling_enabled,
+        imap_polling_interval_seconds=polling_interval_seconds,
+        imap_polling_run_immediately=polling_run_immediately,
     )
 
 
@@ -100,6 +138,87 @@ def test_dashboard_hides_import_button_without_imap_configuration(tmp_path: Path
     assert response.status_code == 200
     assert 'action="/admin/import-mail"' not in response.text
     assert "Import IMAP nie jest skonfigurowany." in response.text
+
+
+def test_dashboard_shows_polling_disabled_by_default(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Automatyczny import poczty: wy" in response.text
+
+
+def test_dashboard_shows_active_polling_status_and_interval(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, with_imap=True)
+    app = create_app(settings)
+    app.state.mail_import_poller = _FakePoller(
+        interval_seconds=300,
+        status=MailPollStatus(
+            running=True,
+            last_started_at=None,
+            last_finished_at=None,
+            last_success_at=None,
+            last_result=None,
+            last_error=None,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Automatyczny import poczty: aktywny" in response.text
+    assert "Interwa" in response.text
+    assert "300 sekund" in response.text
+
+
+def test_dashboard_shows_last_polling_result(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, with_imap=True)
+    app = create_app(settings)
+    app.state.mail_import_poller = _FakePoller(
+        interval_seconds=300,
+        status=MailPollStatus(
+            running=True,
+            last_started_at=datetime(2026, 7, 23, 10, 0, tzinfo=UTC),
+            last_finished_at=datetime(2026, 7, 23, 10, 1, tzinfo=UTC),
+            last_success_at=datetime(2026, 7, 23, 10, 1, tzinfo=UTC),
+            last_result=MailImportResult(imported=2, skipped=14, failed=0),
+            last_error=None,
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Ostatni import: zaimportowano 2" in response.text
+    assert "pomini" in response.text
+    assert "b" in response.text
+
+
+def test_dashboard_shows_generic_polling_error_without_raw_exception(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, with_imap=True)
+    app = create_app(settings)
+    app.state.mail_import_poller = _FakePoller(
+        interval_seconds=300,
+        status=MailPollStatus(
+            running=True,
+            last_started_at=datetime(2026, 7, 23, 10, 0, tzinfo=UTC),
+            last_finished_at=datetime(2026, 7, 23, 10, 1, tzinfo=UTC),
+            last_success_at=None,
+            last_result=None,
+            last_error="IMAP import failed",
+        ),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Ostatni automatyczny import zako" in response.text
+    assert "secret imap failure" not in response.text
 
 
 def test_dashboard_displays_mail_import_success_message(tmp_path: Path) -> None:
@@ -363,3 +482,89 @@ def test_dashboard_shows_new_cases_after_manual_import_redirect(tmp_path: Path) 
     assert response.status_code == 200
     assert "Import poczty zako" in response.text
     assert "CASE-000001" in response.text
+
+
+def test_create_app_rejects_polling_enabled_without_imap_configuration(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, polling_enabled=True)
+
+    with pytest.raises(ValueError, match="IMAP polling requires IMAP configuration"):
+        create_app(settings)
+
+
+def test_create_app_does_not_start_poller_during_build(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, with_imap=True, polling_enabled=True)
+    app = create_app(settings)
+
+    poller = app.state.mail_import_poller
+
+    assert poller is not None
+    assert poller.is_running is False
+
+
+def test_create_app_builds_poller_when_polling_enabled(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, with_imap=True, polling_enabled=True)
+    app = create_app(settings)
+
+    assert app.state.mail_import_poller is not None
+
+
+def test_create_app_uses_same_lock_for_manual_endpoint_and_poller(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, with_imap=True, polling_enabled=True)
+    app = create_app(settings)
+
+    poller = app.state.mail_import_poller
+
+    assert poller is not None
+    assert poller.import_lock is app.state.mail_import_lock
+
+
+def test_poller_starts_and_stops_with_lifespan(tmp_path: Path) -> None:
+    settings = _settings(
+        tmp_path,
+        with_imap=True,
+        polling_enabled=True,
+        polling_interval_seconds=30,
+    )
+    app = create_app(settings)
+    poller = app.state.mail_import_poller
+    assert poller is not None
+    assert poller.is_running is False
+
+    with TestClient(app):
+        assert poller.is_running is True
+
+    assert poller.is_running is False
+
+
+def test_manual_import_returns_busy_while_automatic_import_holds_lock(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, with_imap=True)
+    app = create_app(settings)
+    release_event = Event()
+
+    def hold_import_open() -> None:
+        release_event.wait(1.0)
+
+    fake_service = _FakeMailImportService(
+        result=MailImportResult(imported=1, skipped=0, failed=0),
+        on_call=hold_import_open,
+    )
+    poller = MailImportPoller(
+        import_service=fake_service,
+        import_lock=app.state.mail_import_lock,
+        interval_seconds=30.0,
+        run_immediately=True,
+    )
+    app.state.mail_import_service = fake_service
+    app.state.mail_import_poller = poller
+
+    with TestClient(app) as client:
+        poller.start()
+        try:
+            wait_until(lambda: fake_service.calls >= 1)
+            response = client.post("/admin/import-mail", follow_redirects=False)
+        finally:
+            release_event.set()
+            poller.stop()
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/?mail_import_busy=1"

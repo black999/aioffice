@@ -24,6 +24,9 @@ class AppSettings:
     imap_password: str | None = None
     imap_mailbox: str = "INBOX"
     imap_use_ssl: bool = True
+    imap_polling_enabled: bool = False
+    imap_polling_interval_seconds: int = 300
+    imap_polling_run_immediately: bool = False
 
     @classmethod
     def from_environment(cls) -> AppSettings:
@@ -38,6 +41,12 @@ class AppSettings:
         imap_mailbox = os.environ.get("AIOFFICE_IMAP_MAILBOX", "INBOX")
         imap_use_ssl_raw = os.environ.get("AIOFFICE_IMAP_USE_SSL", "true")
         imap_port_raw = os.environ.get("AIOFFICE_IMAP_PORT", "993")
+        imap_polling_enabled_raw = os.environ.get("AIOFFICE_IMAP_POLLING_ENABLED", "false")
+        imap_polling_interval_raw = os.environ.get("AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS", "300")
+        imap_polling_run_immediately_raw = os.environ.get(
+            "AIOFFICE_IMAP_POLLING_RUN_IMMEDIATELY",
+            "false",
+        )
         try:
             port = int(port_raw)
         except ValueError as error:
@@ -60,6 +69,28 @@ class AppSettings:
             msg = f"AIOFFICE_IMAP_USE_SSL must be 'true' or 'false', got {imap_use_ssl_raw!r}"
             raise ValueError(msg)
         imap_use_ssl = normalized_imap_use_ssl == "true"
+        imap_polling_enabled = _parse_boolean(
+            "AIOFFICE_IMAP_POLLING_ENABLED",
+            imap_polling_enabled_raw,
+        )
+        imap_polling_run_immediately = _parse_boolean(
+            "AIOFFICE_IMAP_POLLING_RUN_IMMEDIATELY",
+            imap_polling_run_immediately_raw,
+        )
+        try:
+            imap_polling_interval_seconds = int(imap_polling_interval_raw)
+        except ValueError as error:
+            msg = (
+                "AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS must be an integer, "
+                f"got {imap_polling_interval_raw!r}"
+            )
+            raise ValueError(msg) from error
+        if not 30 <= imap_polling_interval_seconds <= 86400:
+            msg = (
+                "AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS must be between 30 and 86400, "
+                f"got {imap_polling_interval_seconds}"
+            )
+            raise ValueError(msg)
 
         return cls(
             data_directory=data_directory,
@@ -75,4 +106,15 @@ class AppSettings:
             imap_password=imap_password,
             imap_mailbox=imap_mailbox,
             imap_use_ssl=imap_use_ssl,
+            imap_polling_enabled=imap_polling_enabled,
+            imap_polling_interval_seconds=imap_polling_interval_seconds,
+            imap_polling_run_immediately=imap_polling_run_immediately,
         )
+
+
+def _parse_boolean(variable_name: str, raw_value: str) -> bool:
+    normalized_value = raw_value.strip().lower()
+    if normalized_value not in {"true", "false"}:
+        msg = f"{variable_name} must be 'true' or 'false', got {raw_value!r}"
+        raise ValueError(msg)
+    return normalized_value == "true"

@@ -17,6 +17,21 @@
             {% if mail_import_message %}
             <p><mark>{{ mail_import_message }}</mark></p>
             {% endif %}
+            {% if mail_polling_enabled %}
+            <p>Automatyczny import poczty: aktywny</p>
+            <p>Interwał: {{ mail_polling_interval_seconds }} sekund</p>
+            {% if mail_polling_status and mail_polling_status.last_error %}
+            <p>Ostatni automatyczny import zakończył się błędem.</p>
+            {% elif mail_polling_status and mail_polling_status.last_result %}
+            <p>
+                Ostatni import: zaimportowano {{ mail_polling_status.last_result.imported }},
+                pominięto {{ mail_polling_status.last_result.skipped }},
+                błędy {{ mail_polling_status.last_result.failed }}
+            </p>
+            {% endif %}
+            {% else %}
+            <p>Automatyczny import poczty: wyłączony</p>
+            {% endif %}
             {% if mail_import_available %}
             <form method="post" action="/admin/import-mail">
                 <button type="submit">Importuj pocztę</button>

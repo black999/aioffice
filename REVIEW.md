@@ -45,10 +45,13 @@
 ## IMAP import
 
 - IMAP import can now be started manually from the dashboard.
-- IMAP import is not started automatically yet.
-- There is no automatic polling or scheduler yet.
+- Automatic IMAP polling is now available inside the application process.
+- Poller status is not persisted and is lost after restart.
 - The HTTP request remains open until a manual IMAP import finishes.
 - The import lock protects only a single application process instance.
+- Multiple workers can still run separate imports because there is no distributed lock.
+- There is no distributed lock across multiple processes or hosts.
+- There are no per-account schedules yet.
 - OAuth2 is not supported yet.
 - Multiple accounts are not supported yet.
 - Attachments are not imported as separate artifacts yet.

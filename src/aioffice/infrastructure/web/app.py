@@ -23,6 +23,8 @@ from aioffice.infrastructure import (
     AppSettings,
     FilesystemStorage,
     IMAPMailboxClient,
+    MailImportPoller,
+    MailPollStatus,
     SQLiteCaseNumberProvider,
     SQLiteCaseRepository,
     SQLiteImportedMailRepository,
@@ -76,6 +78,14 @@ def _build_mail_import_redirect(result: MailImportResult) -> RedirectResponse:
     )
 
 
+def _build_mail_polling_snapshot(
+    poller: MailImportPoller | None,
+) -> tuple[bool, int | None, MailPollStatus | None]:
+    if poller is None:
+        return False, None, None
+    return True, int(poller.interval_seconds), poller.get_status()
+
+
 def create_app(settings: AppSettings | None = None) -> FastAPI:
     """Create the FastAPI application."""
 
@@ -120,26 +130,47 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             case_repository=import_repository,
             case_number_provider=number_provider,
         )
+    if settings.imap_polling_enabled and mail_import_service is None:
+        msg = "IMAP polling requires IMAP configuration"
+        raise ValueError(msg)
+
+    mail_import_lock = Lock()
+    mail_import_poller: MailImportPoller | None = None
+    if settings.imap_polling_enabled and mail_import_service is not None:
+        mail_import_poller = MailImportPoller(
+            import_service=mail_import_service,
+            import_lock=mail_import_lock,
+            interval_seconds=float(settings.imap_polling_interval_seconds),
+            run_immediately=settings.imap_polling_run_immediately,
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             watch_folder.start()
+            if mail_import_poller is not None:
+                mail_import_poller.start()
             yield
         finally:
+            if mail_import_poller is not None:
+                mail_import_poller.stop()
             watch_folder.stop()
+            if imported_mail_repository is not None:
+                imported_mail_repository.close()
             repository.close()
             import_repository.close()
             number_provider.close()
-            if imported_mail_repository is not None:
-                imported_mail_repository.close()
 
     app = FastAPI(title="AI Office", lifespan=lifespan)
     app.state.mail_import_service = mail_import_service
-    app.state.mail_import_lock = Lock()
+    app.state.mail_import_lock = mail_import_lock
+    app.state.mail_import_poller = mail_import_poller
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:
+        polling_enabled, polling_interval_seconds, polling_status = _build_mail_polling_snapshot(
+            request.app.state.mail_import_poller
+        )
         return _TEMPLATES.TemplateResponse(
             request,
             "index.html",
@@ -149,6 +180,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                 "cases": dashboard_service.list_cases(),
                 "mail_import_available": request.app.state.mail_import_service is not None,
                 "mail_import_message": _build_mail_import_message(request),
+                "mail_polling_enabled": polling_enabled,
+                "mail_polling_interval_seconds": polling_interval_seconds,
+                "mail_polling_status": polling_status,
             },
         )
 
