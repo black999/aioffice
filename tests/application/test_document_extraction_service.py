@@ -126,7 +126,9 @@ class _LocatorExtractor(DocumentTextExtractor):
     failing_locators: set[str] = ()
 
     def supports(self, artifact: DownloadableArtifact) -> bool:
-        return artifact.display_name.lower().endswith(self.supported_suffixes)
+        return artifact.display_name.lower().endswith(
+            self.supported_suffixes
+        ) or artifact.storage_reference.locator.lower().endswith(self.supported_suffixes)
 
     def extract_text(self, source: BytesIO) -> str | None:
         locator = source.getvalue().decode("utf-8")
@@ -238,6 +240,33 @@ def test_document_extraction_service_skips_documents_without_text_and_unsupporte
     assert result == type(result)(extracted=0, skipped=2, failed=0)
     assert repository.save_calls == 0
     assert storage.stored == []
+
+
+def test_document_extraction_service_extracts_pdf_from_locator_when_attachment_metadata_is_generic() -> None:
+    pdf_record = _record(
+        ArtifactType.ATTACHMENT,
+        "artifacts/source/document.pdf",
+        "attachment.bin",
+        content_type="application/octet-stream",
+    )
+    repository = _FakeRepository(persisted_case=_persisted_case(pdf_record))
+    storage = _FakeStorage()
+    reader = _FakeStorageReader(contents_by_locator={"artifacts/source/document.pdf": b"pdf-source"})
+    extractor = _LocatorExtractor(supported_suffixes=(".pdf",), results={"pdf-source": "PDF text"})
+    service = DocumentExtractionService(
+        repository=repository,
+        storage=storage,
+        storage_reader=reader,
+        extractors=(extractor,),
+        max_input_bytes=1024,
+        max_output_chars=1000,
+    )
+
+    result = service.extract_case_documents(repository.persisted_case.case.id)  # type: ignore[union-attr]
+
+    assert result == type(result)(extracted=1, skipped=0, failed=0)
+    assert repository.saved_records is not None
+    assert repository.saved_records[-1].display_name == "attachment.txt"
 
 
 def test_document_extraction_service_is_idempotent_per_source_position() -> None:

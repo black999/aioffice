@@ -51,6 +51,23 @@ def test_pdf_text_extractor_supports_pdf_content_type_and_extension() -> None:
     assert extractor.supports(_artifact(display_name="document.PDF", content_type=None))
 
 
+def test_pdf_text_extractor_supports_pdf_locator_even_when_metadata_is_generic() -> None:
+    extractor = PDFTextExtractor()
+    artifact = DownloadableArtifact(
+        case_id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        position=0,
+        artifact_type=ArtifactType.ATTACHMENT,
+        storage_reference=StorageReference(
+            storage_name="filesystem",
+            locator="artifacts/aa/bb/document.pdf",
+        ),
+        display_name="attachment.bin",
+        content_type="application/octet-stream",
+    )
+
+    assert extractor.supports(artifact)
+
+
 def test_pdf_text_extractor_extracts_single_page_text() -> None:
     extractor = PDFTextExtractor()
 

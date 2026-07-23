@@ -30,9 +30,12 @@ class PDFTextExtractor(DocumentTextExtractor):
     """Extract text from PDFs that already contain a text layer."""
 
     def supports(self, artifact: DownloadableArtifact) -> bool:
-        if artifact.content_type == "application/pdf":
+        content_type = (artifact.content_type or "").lower()
+        if content_type.startswith("application/pdf"):
             return True
-        return artifact.display_name.lower().endswith(".pdf")
+        if artifact.display_name.lower().endswith(".pdf"):
+            return True
+        return artifact.storage_reference.locator.lower().endswith(".pdf")
 
     def extract_text(self, source: BinaryIO) -> str | None:
         try:
