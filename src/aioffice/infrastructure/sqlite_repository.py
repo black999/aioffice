@@ -8,7 +8,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from aioffice.application import CaseNumberProvider, CaseRepository, PersistedCase
+from aioffice.application import (
+    ArtifactLocatorConflictError,
+    CaseNumberProvider,
+    CaseRepository,
+    PersistedCase,
+)
 from aioffice.domain import Artifact, ArtifactType, Case, Identifier, StorageReference
 
 
@@ -39,29 +44,36 @@ class SQLiteCaseRepository(CaseRepository):
         """Persist a case with its assigned business reference number."""
 
         with self._lock:
-            existing_row = self._connection.execute(
-                "SELECT created_at FROM cases WHERE id = ?",
-                (str(case.id),),
-            ).fetchone()
-            created_at = (
-                existing_row["created_at"]
-                if existing_row is not None
-                else datetime.now(UTC).isoformat(timespec="seconds")
-            )
-            artifact_locator = case.artifacts[0].storage_reference.locator if case.artifacts else None
-            self._connection.execute(
-                """
-                INSERT INTO cases (id, reference_number, status, created_at, primary_artifact_locator)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    reference_number = excluded.reference_number,
-                    status = excluded.status,
-                    created_at = excluded.created_at,
-                    primary_artifact_locator = excluded.primary_artifact_locator
-                """,
-                (str(case.id), reference_number, self.default_status, created_at, artifact_locator),
-            )
-            self._connection.commit()
+            try:
+                existing_row = self._connection.execute(
+                    "SELECT created_at FROM cases WHERE id = ?",
+                    (str(case.id),),
+                ).fetchone()
+                created_at = (
+                    existing_row["created_at"]
+                    if existing_row is not None
+                    else datetime.now(UTC).isoformat(timespec="seconds")
+                )
+                artifact_locator = case.artifacts[0].storage_reference.locator if case.artifacts else None
+                self._connection.execute(
+                    """
+                    INSERT INTO cases (id, reference_number, status, created_at, primary_artifact_locator)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        reference_number = excluded.reference_number,
+                        status = excluded.status,
+                        created_at = excluded.created_at,
+                        primary_artifact_locator = excluded.primary_artifact_locator
+                    """,
+                    (str(case.id), reference_number, self.default_status, created_at, artifact_locator),
+                )
+                self._connection.commit()
+            except sqlite3.IntegrityError as error:
+                self._connection.rollback()
+                if self._is_artifact_locator_conflict(error):
+                    msg = "artifact locator is already assigned to another case"
+                    raise ArtifactLocatorConflictError(msg) from error
+                raise
 
     def get(self, case_id: Identifier) -> PersistedCase | None:
         """Load a persisted case by identifier."""
@@ -132,6 +144,10 @@ class SQLiteCaseRepository(CaseRepository):
             status=str(row["status"]),
             created_at=str(row["created_at"]),
         )
+
+    def _is_artifact_locator_conflict(self, error: sqlite3.IntegrityError) -> bool:
+        message = str(error)
+        return "cases.primary_artifact_locator" in message or "ux_cases_primary_artifact_locator" in message
 
     def _create_tables(self) -> None:
         with self._lock:

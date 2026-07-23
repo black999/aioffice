@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from aioffice.application import CaseFactory, CaseRepository, PersistedCase, format_case_reference
+from aioffice.application import (
+    ArtifactLocatorConflictError,
+    CaseFactory,
+    CaseRepository,
+    PersistedCase,
+    format_case_reference,
+)
 from aioffice.application.services import DocumentImportService
 from aioffice.domain import Artifact, ArtifactType, Case, Identifier
 from aioffice.infrastructure import FilesystemStorage, SQLiteCaseNumberProvider, SQLiteCaseRepository
@@ -32,7 +38,7 @@ class _RaceConditionRepository(CaseRepository):
 
     def save(self, case: Case, reference_number: int) -> None:
         self.save_calls += 1
-        raise sqlite3.IntegrityError("UNIQUE constraint failed: cases.primary_artifact_locator")
+        raise ArtifactLocatorConflictError("artifact locator is already assigned to another case")
 
     def get(self, case_id: Identifier) -> PersistedCase | None:
         if self.persisted_case.case.id == case_id:
@@ -263,6 +269,7 @@ def test_concurrent_unique_locator_conflict_returns_existing_case(tmp_path: Path
     assert returned_case.id == existing_case.id
     assert provider.calls == 1
     assert repository.save_calls == 1
+    assert repository.get_calls == 2
 
 
 def test_other_integrity_errors_are_not_hidden(tmp_path: Path) -> None:

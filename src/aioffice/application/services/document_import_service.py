@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
 from aioffice.application.case_numbers import CaseNumberProvider
 from aioffice.application.cases import CaseFactory
-from aioffice.application.repositories import CaseRepository
+from aioffice.application.repositories import ArtifactLocatorConflictError, CaseRepository
 from aioffice.application.storage import DocumentStorage
 from aioffice.domain import Artifact, ArtifactType, Case
 
@@ -35,15 +34,9 @@ class DocumentImportService:
         case = self.case_factory.create_from_artifact(artifact)
         try:
             self.case_repository.save(case, reference_number)
-        except sqlite3.IntegrityError as error:
-            if not self._is_locator_conflict(error):
-                raise
+        except ArtifactLocatorConflictError:
             existing_case = self.case_repository.get_by_artifact_locator(storage_reference.locator)
             if existing_case is None:
                 raise
             return existing_case.case
         return case
-
-    def _is_locator_conflict(self, error: sqlite3.IntegrityError) -> bool:
-        message = str(error)
-        return "cases.primary_artifact_locator" in message or "ux_cases_primary_artifact_locator" in message

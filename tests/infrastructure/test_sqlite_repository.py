@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from aioffice.application import ArtifactLocatorConflictError
 from aioffice.domain import Artifact, ArtifactType, Case, Identifier, StorageReference
 from aioffice.infrastructure import SQLiteCaseRepository
 
@@ -144,9 +145,49 @@ def test_repository_rejects_duplicate_non_empty_locator(tmp_path: Path) -> None:
     )
     repository.save(first_case, reference_number=1)
 
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(ArtifactLocatorConflictError):
         repository.save(second_case, reference_number=2)
 
+    repository.close()
+
+
+def test_repository_propagates_reference_number_integrity_error(tmp_path: Path) -> None:
+    repository = SQLiteCaseRepository(database_path=tmp_path / "storage" / "aioffice.db")
+    first_case = Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+    second_case = Case(id=Identifier.from_string("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
+    repository.save(first_case, reference_number=1)
+
+    with pytest.raises(sqlite3.IntegrityError, match="cases.reference_number"):
+        repository.save(second_case, reference_number=1)
+
+    repository.close()
+
+
+def test_repository_rolls_back_transaction_after_locator_conflict(tmp_path: Path) -> None:
+    repository = SQLiteCaseRepository(database_path=tmp_path / "storage" / "aioffice.db")
+    first_case = Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+    first_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.PDF,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.pdf"),
+        )
+    )
+    second_case = Case(id=Identifier.from_string("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
+    second_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.PDF,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.pdf"),
+        )
+    )
+    repository.save(first_case, reference_number=1)
+
+    with pytest.raises(ArtifactLocatorConflictError):
+        repository.save(second_case, reference_number=2)
+
+    third_case = Case(id=Identifier.from_string("cccccccc-cccc-cccc-cccc-cccccccccccc"))
+    repository.save(third_case, reference_number=3)
+
+    assert repository.count() == 2
     repository.close()
 
 

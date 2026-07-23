@@ -8,6 +8,10 @@ from typing import Protocol
 from aioffice.domain import Case, Identifier
 
 
+class ArtifactLocatorConflictError(RuntimeError):
+    """Raised when an artifact locator is already assigned to another case."""
+
+
 @dataclass(frozen=True, slots=True)
 class PersistedCase:
     """Case plus persistence metadata needed by the application layer."""
