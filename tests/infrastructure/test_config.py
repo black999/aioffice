@@ -37,6 +37,8 @@ def test_app_settings_uses_default_values(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.imap_polling_enabled is False
     assert settings.imap_polling_interval_seconds == 300
     assert settings.imap_polling_run_immediately is False
+    assert settings.imap_max_attachment_bytes == 25 * 1024 * 1024
+    assert settings.imap_max_attachments_per_message == 50
 
 
 def test_app_settings_reads_all_environment_variables(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -67,6 +69,8 @@ def test_app_settings_reads_all_environment_variables(monkeypatch: pytest.Monkey
     assert settings.imap_polling_enabled is True
     assert settings.imap_polling_interval_seconds == 600
     assert settings.imap_polling_run_immediately is True
+    assert settings.imap_max_attachment_bytes == 25 * 1024 * 1024
+    assert settings.imap_max_attachments_per_message == 50
 
 
 def test_app_settings_expands_home_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -228,5 +232,63 @@ def test_app_settings_rejects_invalid_imap_polling_run_immediately_flag(
     with pytest.raises(
         ValueError,
         match="AIOFFICE_IMAP_POLLING_RUN_IMMEDIATELY must be 'true' or 'false'",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_reads_imap_attachment_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_MAX_ATTACHMENT_BYTES", str(5 * 1024 * 1024))
+    monkeypatch.setenv("AIOFFICE_IMAP_MAX_ATTACHMENTS_PER_MESSAGE", "20")
+
+    settings = AppSettings.from_environment()
+
+    assert settings.imap_max_attachment_bytes == 5 * 1024 * 1024
+    assert settings.imap_max_attachments_per_message == 20
+
+
+def test_app_settings_rejects_imap_attachment_size_below_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_MAX_ATTACHMENT_BYTES", str(1024 * 1024 - 1))
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_IMAP_MAX_ATTACHMENT_BYTES must be between 1048576 and 104857600",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_imap_attachment_size_above_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_MAX_ATTACHMENT_BYTES", str(100 * 1024 * 1024 + 1))
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_IMAP_MAX_ATTACHMENT_BYTES must be between 1048576 and 104857600",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_imap_attachment_count_below_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_MAX_ATTACHMENTS_PER_MESSAGE", "0")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_IMAP_MAX_ATTACHMENTS_PER_MESSAGE must be between 1 and 200",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_imap_attachment_count_above_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_MAX_ATTACHMENTS_PER_MESSAGE", "201")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_IMAP_MAX_ATTACHMENTS_PER_MESSAGE must be between 1 and 200",
     ):
         AppSettings.from_environment()

@@ -52,9 +52,15 @@
 - Multiple workers can still run separate imports because there is no distributed lock.
 - There is no distributed lock across multiple processes or hosts.
 - There are no per-account schedules yet.
+- There is no OCR yet.
+- There is no text extraction from PDF or DOCX yet.
+- The UI does not allow downloading artifacts yet.
+- There is no antivirus scanning for attachments yet.
+- There is no garbage collector for unreferenced content-addressed files yet.
+- Attachment filenames are sanitized before storage-derived suffix selection.
+- Case status still does not depend on parsing outcomes.
 - OAuth2 is not supported yet.
 - Multiple accounts are not supported yet.
-- Attachments are not imported as separate artifacts yet.
 - Automatic replies are not implemented.
 - Imported messages are not moved to another folder after import.
 - The IMAP password is currently passed through an environment variable.

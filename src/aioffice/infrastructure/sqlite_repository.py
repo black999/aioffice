@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
-from threading import RLock
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import RLock
 
 from aioffice.application import (
     ArtifactLocatorConflictError,
@@ -88,6 +88,31 @@ class SQLiteCaseRepository(CaseRepository):
                         artifact_type,
                     ),
                 )
+                self._connection.execute("DELETE FROM case_artifacts WHERE case_id = ?", (str(case.id),))
+                artifact_rows = [
+                    (
+                        str(case.id),
+                        position,
+                        artifact.artifact_type.value,
+                        artifact.storage_reference.storage_name,
+                        artifact.storage_reference.locator,
+                    )
+                    for position, artifact in enumerate(case.artifacts)
+                ]
+                if artifact_rows:
+                    self._connection.executemany(
+                        """
+                        INSERT INTO case_artifacts (
+                            case_id,
+                            position,
+                            artifact_type,
+                            storage_name,
+                            locator
+                        )
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        artifact_rows,
+                    )
                 self._connection.commit()
             except sqlite3.IntegrityError as error:
                 self._connection.rollback()
@@ -116,7 +141,8 @@ class SQLiteCaseRepository(CaseRepository):
             ).fetchone()
             if row is None:
                 return None
-            return self._build_persisted_case(row)
+            artifact_rows = self._load_artifact_rows((str(case_id),))
+            return self._build_persisted_case(row, artifact_rows)
 
     def get_by_artifact_locator(self, locator: str) -> PersistedCase | None:
         """Load a persisted case by its primary artifact locator."""
@@ -125,21 +151,25 @@ class SQLiteCaseRepository(CaseRepository):
             row = self._connection.execute(
                 """
                 SELECT
-                    id,
-                    reference_number,
-                    status,
-                    created_at,
-                    primary_artifact_locator,
-                    primary_artifact_type
-                FROM cases
-                WHERE primary_artifact_locator = ?
+                    c.id,
+                    c.reference_number,
+                    c.status,
+                    c.created_at,
+                    c.primary_artifact_locator,
+                    c.primary_artifact_type
+                FROM cases AS c
+                INNER JOIN case_artifacts AS a
+                    ON a.case_id = c.id
+                WHERE a.position = 0
+                  AND a.locator = ?
                 LIMIT 1
                 """,
                 (locator,),
             ).fetchone()
             if row is None:
                 return None
-            return self._build_persisted_case(row)
+            artifact_rows = self._load_artifact_rows((str(row["id"]),))
+            return self._build_persisted_case(row, artifact_rows)
 
     def list(self) -> tuple[PersistedCase, ...]:
         """List all persisted cases."""
@@ -158,7 +188,17 @@ class SQLiteCaseRepository(CaseRepository):
                 ORDER BY reference_number ASC
                 """,
             ).fetchall()
-            return tuple(self._build_persisted_case(row) for row in rows)
+            if not rows:
+                return ()
+            case_ids = tuple(str(row["id"]) for row in rows)
+            artifact_rows = self._load_artifact_rows(case_ids)
+            artifacts_by_case_id: dict[str, list[sqlite3.Row]] = {}
+            for artifact_row in artifact_rows:
+                artifacts_by_case_id.setdefault(str(artifact_row["case_id"]), []).append(artifact_row)
+            return tuple(
+                self._build_persisted_case(row, tuple(artifacts_by_case_id.get(str(row["id"]), ())))
+                for row in rows
+            )
 
     def count(self) -> int:
         """Count all persisted cases."""
@@ -169,20 +209,23 @@ class SQLiteCaseRepository(CaseRepository):
                 return 0
             return int(row["total"])
 
-    def _build_persisted_case(self, row: sqlite3.Row) -> PersistedCase:
+    def _build_persisted_case(
+        self,
+        row: sqlite3.Row,
+        artifact_rows: tuple[sqlite3.Row, ...],
+    ) -> PersistedCase:
         case = Case(id=Identifier.from_string(row["id"]))
-        if row["primary_artifact_locator"] is not None:
-            artifact_type_value = row["primary_artifact_type"] or ArtifactType.PDF.value
-            artifact_type = ArtifactType(artifact_type_value)
+        for artifact_row in artifact_rows:
+            artifact_type = ArtifactType(str(artifact_row["artifact_type"]))
             artifact = Artifact(
                 artifact_type=artifact_type,
                 storage_reference=StorageReference(
-                    storage_name="filesystem",
-                    locator=row["primary_artifact_locator"],
+                    storage_name=str(artifact_row["storage_name"]),
+                    locator=str(artifact_row["locator"]),
                 ),
             )
             case.add_artifact(artifact)
-            case.pull_events()
+        case.pull_events()
         return PersistedCase(
             case=case,
             reference_number=int(row["reference_number"]),
@@ -192,7 +235,11 @@ class SQLiteCaseRepository(CaseRepository):
 
     def _is_artifact_locator_conflict(self, error: sqlite3.IntegrityError) -> bool:
         message = str(error)
-        return "cases.primary_artifact_locator" in message or "ux_cases_primary_artifact_locator" in message
+        return (
+            "cases.primary_artifact_locator" in message
+            or "ux_cases_primary_artifact_locator" in message
+            or "ux_case_artifacts_primary_locator" in message
+        )
 
     def _create_tables(self) -> None:
         with self._lock:
@@ -205,6 +252,19 @@ class SQLiteCaseRepository(CaseRepository):
                     created_at TEXT NOT NULL,
                     primary_artifact_locator TEXT,
                     primary_artifact_type TEXT
+                )
+                """
+            )
+            self._connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS case_artifacts (
+                    case_id TEXT NOT NULL,
+                    position INTEGER NOT NULL,
+                    artifact_type TEXT NOT NULL,
+                    storage_name TEXT NOT NULL,
+                    locator TEXT NOT NULL,
+                    PRIMARY KEY (case_id, position),
+                    FOREIGN KEY (case_id) REFERENCES cases(id)
                 )
                 """
             )
@@ -242,18 +302,50 @@ class SQLiteCaseRepository(CaseRepository):
                 ON cases(primary_artifact_locator)
                 """
             )
+            self._connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS ix_case_artifacts_locator
+                ON case_artifacts(locator)
+                """
+            )
+            self._connection.execute(
+                """
+                INSERT INTO case_artifacts (
+                    case_id,
+                    position,
+                    artifact_type,
+                    storage_name,
+                    locator
+                )
+                SELECT
+                    cases.id,
+                    0,
+                    COALESCE(cases.primary_artifact_type, ?),
+                    'filesystem',
+                    cases.primary_artifact_locator
+                FROM cases
+                WHERE cases.primary_artifact_locator IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM case_artifacts
+                    WHERE case_artifacts.case_id = cases.id
+                      AND case_artifacts.position = 0
+                  )
+                """,
+                (ArtifactType.PDF.value,),
+            )
             duplicate_locator_row = self._connection.execute(
                 """
-                SELECT primary_artifact_locator
-                FROM cases
-                WHERE primary_artifact_locator IS NOT NULL
-                GROUP BY primary_artifact_locator
+                SELECT locator
+                FROM case_artifacts
+                WHERE position = 0
+                GROUP BY locator
                 HAVING COUNT(*) > 1
                 LIMIT 1
                 """
             ).fetchone()
             if duplicate_locator_row is not None:
-                duplicate_locator = str(duplicate_locator_row["primary_artifact_locator"])
+                duplicate_locator = str(duplicate_locator_row["locator"])
                 msg = (
                     "Cannot create unique locator index because duplicate "
                     f"primary_artifact_locator values already exist: {duplicate_locator}"
@@ -266,7 +358,29 @@ class SQLiteCaseRepository(CaseRepository):
                 WHERE primary_artifact_locator IS NOT NULL
                 """
             )
+            self._connection.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_case_artifacts_primary_locator
+                ON case_artifacts(locator)
+                WHERE position = 0
+                """
+            )
             self._connection.commit()
+
+    def _load_artifact_rows(self, case_ids: tuple[str, ...]) -> tuple[sqlite3.Row, ...]:
+        if not case_ids:
+            return ()
+        placeholders = ", ".join("?" for _ in case_ids)
+        rows = self._connection.execute(
+            f"""
+            SELECT case_id, position, artifact_type, storage_name, locator
+            FROM case_artifacts
+            WHERE case_id IN ({placeholders})
+            ORDER BY case_id ASC, position ASC
+            """,
+            case_ids,
+        ).fetchall()
+        return tuple(rows)
 
 
 @dataclass(slots=True)

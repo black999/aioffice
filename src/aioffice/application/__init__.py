@@ -5,9 +5,12 @@ from .cases import CaseFactory, InMemoryCaseRegistry
 from .mail import (
     ImportedMailConflictError,
     ImportedMailRepository,
+    MailContentParser,
     MailboxClient,
     MailboxMessage,
     MailImportResult,
+    ParsedAttachment,
+    ParsedMailContent,
 )
 from .repositories import ArtifactLocatorConflictError, CaseRepository, PersistedCase
 from .storage import DocumentStorage
@@ -18,12 +21,15 @@ __all__ = [
     "CaseNumberProvider",
     "CaseRepository",
     "DocumentStorage",
+    "MailContentParser",
     "ImportedMailConflictError",
     "ImportedMailRepository",
     "InMemoryCaseRegistry",
     "MailboxClient",
     "MailboxMessage",
     "MailImportResult",
+    "ParsedAttachment",
+    "ParsedMailContent",
     "PersistedCase",
     "format_case_reference",
 ]

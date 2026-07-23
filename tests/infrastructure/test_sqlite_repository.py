@@ -222,6 +222,107 @@ def test_list_keeps_primary_artifact_type(tmp_path: Path) -> None:
     repository.close()
 
 
+def test_repository_persists_and_loads_multiple_artifacts_in_order(tmp_path: Path) -> None:
+    database_path = tmp_path / "storage" / "aioffice.db"
+    repository = SQLiteCaseRepository(database_path=database_path)
+    case_id = Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    case = Case(id=case_id)
+    case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.EMAIL,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.eml"),
+        )
+    )
+    case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.TEXT,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.txt"),
+        )
+    )
+    case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.ATTACHMENT,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.pdf"),
+        )
+    )
+    repository.save(case, reference_number=1)
+    repository.close()
+
+    reloaded_repository = SQLiteCaseRepository(database_path=database_path)
+    loaded_case = reloaded_repository.get(case_id)
+
+    assert loaded_case is not None
+    assert tuple(artifact.artifact_type for artifact in loaded_case.case.artifacts) == (
+        ArtifactType.EMAIL,
+        ArtifactType.TEXT,
+        ArtifactType.ATTACHMENT,
+    )
+    reloaded_repository.close()
+
+
+def test_repository_list_restores_all_artifacts(tmp_path: Path) -> None:
+    repository = SQLiteCaseRepository(database_path=tmp_path / "storage" / "aioffice.db")
+    case = Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+    case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.EMAIL,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.eml"),
+        )
+    )
+    case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.TEXT,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.txt"),
+        )
+    )
+    repository.save(case, reference_number=1)
+
+    persisted_cases = repository.list()
+
+    assert len(persisted_cases) == 1
+    assert tuple(artifact.artifact_type for artifact in persisted_cases[0].case.artifacts) == (
+        ArtifactType.EMAIL,
+        ArtifactType.TEXT,
+    )
+    repository.close()
+
+
+def test_repository_does_not_treat_attachment_locator_as_primary_conflict(tmp_path: Path) -> None:
+    repository = SQLiteCaseRepository(database_path=tmp_path / "storage" / "aioffice.db")
+    first_case = Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+    first_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.EMAIL,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/first.eml"),
+        )
+    )
+    first_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.ATTACHMENT,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/shared.pdf"),
+        )
+    )
+    second_case = Case(id=Identifier.from_string("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
+    second_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.EMAIL,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/cc/dd/second.eml"),
+        )
+    )
+    second_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.ATTACHMENT,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/shared.pdf"),
+        )
+    )
+
+    repository.save(first_case, reference_number=1)
+    repository.save(second_case, reference_number=2)
+
+    assert repository.count() == 2
+    repository.close()
+
+
 def test_case_without_artifact_still_round_trips(tmp_path: Path) -> None:
     database_path = tmp_path / "storage" / "aioffice.db"
     repository = SQLiteCaseRepository(database_path=database_path)
@@ -274,6 +375,47 @@ def test_repository_rolls_back_transaction_after_locator_conflict(tmp_path: Path
     repository.save(third_case, reference_number=3)
 
     assert repository.count() == 2
+    repository.close()
+
+
+def test_repository_rolls_back_artifact_rows_after_integrity_error(tmp_path: Path) -> None:
+    repository = SQLiteCaseRepository(database_path=tmp_path / "storage" / "aioffice.db")
+    first_case = Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+    first_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.EMAIL,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.eml"),
+        )
+    )
+    first_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.TEXT,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.txt"),
+        )
+    )
+    second_case = Case(id=Identifier.from_string("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
+    second_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.EMAIL,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.eml"),
+        )
+    )
+    second_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.TEXT,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/cc/dd/file.txt"),
+        )
+    )
+    repository.save(first_case, reference_number=1)
+
+    with pytest.raises(ArtifactLocatorConflictError):
+        repository.save(second_case, reference_number=2)
+
+    loaded_case = repository.get(first_case.id)
+
+    assert loaded_case is not None
+    assert len(loaded_case.case.artifacts) == 2
+    assert repository.count() == 1
     repository.close()
 
 
@@ -385,3 +527,204 @@ def test_repository_migration_adds_primary_artifact_type_and_backfills_pdf(tmp_p
     assert "primary_artifact_type" in columns
     assert rows[0]["primary_artifact_type"] == "pdf"
     assert rows[1]["primary_artifact_type"] is None
+
+
+def test_repository_migration_creates_case_artifacts_from_legacy_primary_artifact(tmp_path: Path) -> None:
+    database_path = tmp_path / "storage" / "aioffice.db"
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        CREATE TABLE cases (
+            id TEXT PRIMARY KEY,
+            reference_number INTEGER UNIQUE NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            primary_artifact_locator TEXT,
+            primary_artifact_type TEXT
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO cases (
+            id,
+            reference_number,
+            status,
+            created_at,
+            primary_artifact_locator,
+            primary_artifact_type
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            1,
+            "open",
+            "2026-07-22T12:00:00+00:00",
+            "artifacts/aa/bb/file.pdf",
+            "pdf",
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    repository = SQLiteCaseRepository(database_path=database_path)
+    repository.close()
+
+    migrated_connection = sqlite3.connect(database_path)
+    migrated_connection.row_factory = sqlite3.Row
+    rows = migrated_connection.execute(
+        """
+        SELECT case_id, position, artifact_type, storage_name, locator
+        FROM case_artifacts
+        ORDER BY case_id ASC, position ASC
+        """
+    ).fetchall()
+    migrated_connection.close()
+
+    assert len(rows) == 1
+    assert rows[0]["position"] == 0
+    assert rows[0]["artifact_type"] == "pdf"
+    assert rows[0]["storage_name"] == "filesystem"
+    assert rows[0]["locator"] == "artifacts/aa/bb/file.pdf"
+
+
+def test_repository_migration_to_case_artifacts_is_idempotent(tmp_path: Path) -> None:
+    database_path = tmp_path / "storage" / "aioffice.db"
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        CREATE TABLE cases (
+            id TEXT PRIMARY KEY,
+            reference_number INTEGER UNIQUE NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            primary_artifact_locator TEXT,
+            primary_artifact_type TEXT
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO cases (
+            id,
+            reference_number,
+            status,
+            created_at,
+            primary_artifact_locator,
+            primary_artifact_type
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            1,
+            "open",
+            "2026-07-22T12:00:00+00:00",
+            "artifacts/aa/bb/file.pdf",
+            "pdf",
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    first_repository = SQLiteCaseRepository(database_path=database_path)
+    first_repository.close()
+    second_repository = SQLiteCaseRepository(database_path=database_path)
+    second_repository.close()
+
+    migrated_connection = sqlite3.connect(database_path)
+    row = migrated_connection.execute("SELECT COUNT(*) FROM case_artifacts").fetchone()
+    migrated_connection.close()
+
+    assert row is not None
+    assert row[0] == 1
+
+
+def test_repository_update_replaces_artifact_list(tmp_path: Path) -> None:
+    repository = SQLiteCaseRepository(database_path=tmp_path / "storage" / "aioffice.db")
+    case_id = Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    first_case = Case(id=case_id)
+    first_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.EMAIL,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.eml"),
+        )
+    )
+    first_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.TEXT,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.txt"),
+        )
+    )
+    repository.save(first_case, reference_number=1)
+
+    updated_case = Case(id=case_id)
+    updated_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.EMAIL,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.eml"),
+        )
+    )
+    updated_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.ATTACHMENT,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/cc/dd/file.pdf"),
+        )
+    )
+    repository.save(updated_case, reference_number=1)
+
+    loaded_case = repository.get(case_id)
+
+    assert loaded_case is not None
+    assert tuple(artifact.artifact_type for artifact in loaded_case.case.artifacts) == (
+        ArtifactType.EMAIL,
+        ArtifactType.ATTACHMENT,
+    )
+    repository.close()
+
+
+def test_repository_raises_for_unknown_artifact_type_in_case_artifacts(tmp_path: Path) -> None:
+    database_path = tmp_path / "storage" / "aioffice.db"
+    repository = SQLiteCaseRepository(database_path=database_path)
+    repository.close()
+
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        INSERT INTO cases (id, reference_number, status, created_at, primary_artifact_locator, primary_artifact_type)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            1,
+            "open",
+            "2026-07-22T12:00:00+00:00",
+            "artifacts/aa/bb/file.unknown",
+            "unknown",
+        ),
+    )
+    connection.execute(
+        """
+        INSERT INTO case_artifacts (case_id, position, artifact_type, storage_name, locator)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            0,
+            "unknown",
+            "filesystem",
+            "artifacts/aa/bb/file.unknown",
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    reloaded_repository = SQLiteCaseRepository(database_path=database_path)
+
+    with pytest.raises(ValueError):
+        reloaded_repository.get(Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+
+    reloaded_repository.close()

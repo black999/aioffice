@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+import re
 
 from aioffice.application import (
     ArtifactLocatorConflictError,
@@ -13,14 +14,17 @@ from aioffice.application import (
     CaseRepository,
     ImportedMailConflictError,
     ImportedMailRepository,
+    MailContentParser,
     MailboxClient,
     MailImportResult,
+    ParsedAttachment,
 )
 from aioffice.application.cases import CaseFactory
 from aioffice.application.storage import DocumentStorage
-from aioffice.domain import Artifact, ArtifactType
+from aioffice.domain import Artifact, ArtifactType, StorageReference
 
 logger = logging.getLogger(__name__)
+_CONTROL_CHARACTERS_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
 
 
 @dataclass(slots=True)
@@ -33,6 +37,9 @@ class MailImportService:
     case_factory: CaseFactory
     case_repository: CaseRepository
     case_number_provider: CaseNumberProvider
+    mail_content_parser: MailContentParser
+    imap_max_attachment_bytes: int = 25 * 1024 * 1024
+    imap_max_attachments_per_message: int = 50
 
     def import_new_messages(self) -> MailImportResult:
         """Import all messages currently visible to the mailbox client."""
@@ -57,12 +64,28 @@ class MailImportService:
                 if existing_case is not None:
                     case = existing_case.case
                 else:
-                    reference_number = self.case_number_provider.next_number()
                     artifact = Artifact(
                         artifact_type=ArtifactType.EMAIL,
                         storage_reference=storage_reference,
                     )
                     case = self.case_factory.create_from_artifact(artifact)
+                    parsed_content = self.mail_content_parser.parse(message.raw_message)
+                    self._validate_attachments(parsed_content.attachments)
+                    if parsed_content.body_text is not None:
+                        case.add_artifact(
+                            Artifact(
+                                artifact_type=ArtifactType.TEXT,
+                                storage_reference=self._store_text_body(parsed_content.body_text),
+                            )
+                        )
+                    for index, attachment in enumerate(parsed_content.attachments, start=1):
+                        case.add_artifact(
+                            Artifact(
+                                artifact_type=ArtifactType.ATTACHMENT,
+                                storage_reference=self._store_attachment(index, attachment),
+                            )
+                        )
+                    reference_number = self.case_number_provider.next_number()
                     try:
                         self.case_repository.save(case, reference_number)
                     except ArtifactLocatorConflictError:
@@ -92,3 +115,46 @@ class MailImportService:
                     temporary_path.unlink()
 
         return MailImportResult(imported=imported, skipped=skipped, failed=failed)
+
+    def _store_text_body(self, body_text: str) -> StorageReference:
+        with NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8", newline="\n") as file:
+            temporary_path = Path(file.name)
+            file.write(body_text)
+        try:
+            return self.storage.store_file(temporary_path)
+        finally:
+            if temporary_path.exists():
+                temporary_path.unlink()
+
+    def _store_attachment(self, index: int, attachment: ParsedAttachment) -> StorageReference:
+        suffix = self._attachment_suffix(index, attachment.filename)
+        with NamedTemporaryFile(suffix=suffix, delete=False) as file:
+            temporary_path = Path(file.name)
+            file.write(attachment.payload)
+        try:
+            return self.storage.store_file(temporary_path)
+        finally:
+            if temporary_path.exists():
+                temporary_path.unlink()
+
+    def _validate_attachments(self, attachments: tuple[ParsedAttachment, ...]) -> None:
+        if len(attachments) > self.imap_max_attachments_per_message:
+            msg = "mail message exceeds attachment count limit"
+            raise RuntimeError(msg)
+        for attachment in attachments:
+            if len(attachment.payload) > self.imap_max_attachment_bytes:
+                msg = "mail message exceeds attachment size limit"
+                raise RuntimeError(msg)
+
+    def _attachment_suffix(self, index: int, filename: str | None) -> str:
+        if filename is None:
+            return ".bin"
+        sanitized_name = _CONTROL_CHARACTERS_PATTERN.sub("_", filename)
+        sanitized_name = sanitized_name.replace("/", "_").replace("\\", "_").replace("..", "_")
+        sanitized_name = sanitized_name.strip(" .")
+        if not sanitized_name:
+            return ".bin"
+        suffix = Path(sanitized_name).suffix.lower()
+        if not suffix or suffix in {".", ".."}:
+            return ".bin"
+        return suffix

@@ -27,6 +27,8 @@ class AppSettings:
     imap_polling_enabled: bool = False
     imap_polling_interval_seconds: int = 300
     imap_polling_run_immediately: bool = False
+    imap_max_attachment_bytes: int = 25 * 1024 * 1024
+    imap_max_attachments_per_message: int = 50
 
     @classmethod
     def from_environment(cls) -> AppSettings:
@@ -46,6 +48,14 @@ class AppSettings:
         imap_polling_run_immediately_raw = os.environ.get(
             "AIOFFICE_IMAP_POLLING_RUN_IMMEDIATELY",
             "false",
+        )
+        imap_max_attachment_bytes_raw = os.environ.get(
+            "AIOFFICE_IMAP_MAX_ATTACHMENT_BYTES",
+            str(25 * 1024 * 1024),
+        )
+        imap_max_attachments_per_message_raw = os.environ.get(
+            "AIOFFICE_IMAP_MAX_ATTACHMENTS_PER_MESSAGE",
+            "50",
         )
         try:
             port = int(port_raw)
@@ -91,6 +101,34 @@ class AppSettings:
                 f"got {imap_polling_interval_seconds}"
             )
             raise ValueError(msg)
+        try:
+            imap_max_attachment_bytes = int(imap_max_attachment_bytes_raw)
+        except ValueError as error:
+            msg = (
+                "AIOFFICE_IMAP_MAX_ATTACHMENT_BYTES must be an integer, "
+                f"got {imap_max_attachment_bytes_raw!r}"
+            )
+            raise ValueError(msg) from error
+        if not 1024 * 1024 <= imap_max_attachment_bytes <= 100 * 1024 * 1024:
+            msg = (
+                "AIOFFICE_IMAP_MAX_ATTACHMENT_BYTES must be between 1048576 and 104857600, "
+                f"got {imap_max_attachment_bytes}"
+            )
+            raise ValueError(msg)
+        try:
+            imap_max_attachments_per_message = int(imap_max_attachments_per_message_raw)
+        except ValueError as error:
+            msg = (
+                "AIOFFICE_IMAP_MAX_ATTACHMENTS_PER_MESSAGE must be an integer, "
+                f"got {imap_max_attachments_per_message_raw!r}"
+            )
+            raise ValueError(msg) from error
+        if not 1 <= imap_max_attachments_per_message <= 200:
+            msg = (
+                "AIOFFICE_IMAP_MAX_ATTACHMENTS_PER_MESSAGE must be between 1 and 200, "
+                f"got {imap_max_attachments_per_message}"
+            )
+            raise ValueError(msg)
 
         return cls(
             data_directory=data_directory,
@@ -109,6 +147,8 @@ class AppSettings:
             imap_polling_enabled=imap_polling_enabled,
             imap_polling_interval_seconds=imap_polling_interval_seconds,
             imap_polling_run_immediately=imap_polling_run_immediately,
+            imap_max_attachment_bytes=imap_max_attachment_bytes,
+            imap_max_attachments_per_message=imap_max_attachments_per_message,
         )
 
 

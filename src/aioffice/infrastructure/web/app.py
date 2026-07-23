@@ -28,6 +28,7 @@ from aioffice.infrastructure import (
     SQLiteCaseNumberProvider,
     SQLiteCaseRepository,
     SQLiteImportedMailRepository,
+    StandardLibraryMailContentParser,
     WatchFolder,
 )
 
@@ -114,6 +115,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     mail_import_service: MailImportService | None = None
     if settings.imap_host is not None and settings.imap_username is not None:
         imported_mail_repository = SQLiteImportedMailRepository(database_path=settings.database_path)
+        mail_content_parser = StandardLibraryMailContentParser()
         mailbox_client = IMAPMailboxClient(
             host=settings.imap_host,
             port=settings.imap_port,
@@ -129,6 +131,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             case_factory=CaseFactory(),
             case_repository=import_repository,
             case_number_provider=number_provider,
+            mail_content_parser=mail_content_parser,
+            imap_max_attachment_bytes=settings.imap_max_attachment_bytes,
+            imap_max_attachments_per_message=settings.imap_max_attachments_per_message,
         )
     if settings.imap_polling_enabled and mail_import_service is None:
         msg = "IMAP polling requires IMAP configuration"

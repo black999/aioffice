@@ -292,6 +292,53 @@ def test_get_case_workspace_displays_artifact(tmp_path: Path) -> None:
     assert "artifacts/aa/bb/document.pdf" in response.text
 
 
+def test_get_case_workspace_displays_all_mail_artifacts_in_order(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    repository = SQLiteCaseRepository(database_path=settings.database_path)
+    case = Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+    case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.EMAIL,
+            storage_reference=StorageReference(
+                storage_name="filesystem",
+                locator="artifacts/aa/bb/message.eml",
+            ),
+        )
+    )
+    case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.TEXT,
+            storage_reference=StorageReference(
+                storage_name="filesystem",
+                locator="artifacts/aa/bb/message.txt",
+            ),
+        )
+    )
+    case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.ATTACHMENT,
+            storage_reference=StorageReference(
+                storage_name="filesystem",
+                locator="artifacts/aa/bb/attachment.pdf",
+            ),
+        )
+    )
+    repository.save(case, reference_number=1)
+    repository.close()
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    assert response.status_code == 200
+    email_position = response.text.index("EMAIL")
+    text_position = response.text.index("TEXT")
+    attachment_position = response.text.index("ATTACHMENT")
+    assert email_position < text_position < attachment_position
+    assert "artifacts/aa/bb/message.eml" in response.text
+    assert "artifacts/aa/bb/message.txt" in response.text
+    assert "artifacts/aa/bb/attachment.pdf" in response.text
+
+
 def test_get_case_workspace_returns_404_for_missing_case(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
 

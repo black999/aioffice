@@ -14,6 +14,23 @@ class ImportedMailConflictError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class ParsedAttachment:
+    """Parsed attachment payload detached from MIME implementation details."""
+
+    filename: str | None
+    content_type: str
+    payload: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedMailContent:
+    """Normalized mail body and extracted attachments."""
+
+    body_text: str | None
+    attachments: tuple[ParsedAttachment, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class MailboxMessage:
     """Mailbox message data detached from any IMAP client implementation."""
 
@@ -56,3 +73,10 @@ class ImportedMailRepository(Protocol):
         case_id: Identifier,
     ) -> None:
         """Persist a mailbox import record."""
+
+
+class MailContentParser(Protocol):
+    """Application-facing parser for extracting mail body and attachments."""
+
+    def parse(self, raw_message: bytes) -> ParsedMailContent:
+        """Parse raw RFC 822 bytes into normalized content."""

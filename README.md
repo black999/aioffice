@@ -77,6 +77,8 @@ export AIOFFICE_IMAP_USE_SSL=true
 export AIOFFICE_IMAP_POLLING_ENABLED=true
 export AIOFFICE_IMAP_POLLING_INTERVAL_SECONDS=300
 export AIOFFICE_IMAP_POLLING_RUN_IMMEDIATELY=false
+export AIOFFICE_IMAP_MAX_ATTACHMENT_BYTES=26214400
+export AIOFFICE_IMAP_MAX_ATTACHMENTS_PER_MESSAGE=50
 ```
 
 Use a proper secret store for the IMAP password in production. Environment variables are only a temporary MVP mechanism.
@@ -107,3 +109,20 @@ Notes:
 - The manual `Importuj pocztę` button still works.
 - The import lock protects only one application process instance.
 - Poll status is kept only in process memory and is lost after restart.
+
+## Mail artifacts
+
+For each imported email message:
+
+- the full message is stored as a primary `.eml` artifact,
+- the extracted body is stored as a UTF-8 `.txt` artifact when useful text exists,
+- attachments are stored as separate attachment artifacts.
+
+Attachment safety limits:
+
+- `AIOFFICE_IMAP_MAX_ATTACHMENT_BYTES` defaults to `26214400` bytes (25 MiB),
+- `AIOFFICE_IMAP_MAX_ATTACHMENTS_PER_MESSAGE` defaults to `50`,
+- attachment size must stay between `1048576` and `104857600` bytes,
+- attachment count must stay between `1` and `200`.
+
+Attachments are not yet analyzed by AI or OCR.

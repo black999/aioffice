@@ -13,6 +13,7 @@ from .storage import StorageReference
 class ArtifactType(StrEnum):
     """Supported artifact categories in Sprint 2."""
 
+    ATTACHMENT = "attachment"
     EMAIL = "email"
     PDF = "pdf"
     TEXT = "text"

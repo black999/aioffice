@@ -10,8 +10,11 @@ from aioffice.application import (
     CaseRepository,
     ImportedMailConflictError,
     ImportedMailRepository,
+    MailContentParser,
     MailboxClient,
     MailboxMessage,
+    ParsedAttachment,
+    ParsedMailContent,
     PersistedCase,
 )
 from aioffice.application.services import MailImportService
@@ -89,11 +92,25 @@ class _ConflictCaseRepository(CaseRepository):
 
 
 @dataclass(slots=True)
+class _FakeMailContentParser(MailContentParser):
+    parsed_content: ParsedMailContent = ParsedMailContent(body_text="Body", attachments=())
+    exception: Exception | None = None
+    calls: int = 0
+
+    def parse(self, raw_message: bytes) -> ParsedMailContent:
+        self.calls += 1
+        if self.exception is not None:
+            raise self.exception
+        return self.parsed_content
+
+
+@dataclass(slots=True)
 class _FailingStorage:
     delegate: FilesystemStorage
+    failing_suffix: str
 
     def store_file(self, source_path: Path) -> StorageReference:
-        if source_path.read_bytes() == b"broken":
+        if source_path.suffix.lower() == self.failing_suffix:
             raise RuntimeError("boom")
         return self.delegate.store_file(source_path)
 
@@ -113,10 +130,21 @@ def _message(uid: str, raw_message: bytes, message_id: str | None = None) -> Mai
 def _service(
     tmp_path: Path,
     messages: tuple[MailboxMessage, ...],
-) -> tuple[MailImportService, SQLiteCaseRepository, _FakeImportedMailRepository, _CountingNumberProvider]:
+    *,
+    parser: _FakeMailContentParser | None = None,
+    attachment_limit_bytes: int = 25 * 1024 * 1024,
+    attachment_limit_count: int = 50,
+) -> tuple[
+    MailImportService,
+    SQLiteCaseRepository,
+    _FakeImportedMailRepository,
+    _CountingNumberProvider,
+    _FakeMailContentParser,
+]:
     repository = SQLiteCaseRepository(database_path=tmp_path / "storage" / "aioffice.db")
     imported_mail_repository = _FakeImportedMailRepository()
     provider = _CountingNumberProvider()
+    fake_parser = parser or _FakeMailContentParser()
     service = MailImportService(
         mailbox_client=_FakeMailboxClient(messages=messages),
         imported_mail_repository=imported_mail_repository,
@@ -124,17 +152,23 @@ def _service(
         case_factory=CaseFactory(),
         case_repository=repository,
         case_number_provider=provider,
+        mail_content_parser=fake_parser,
+        imap_max_attachment_bytes=attachment_limit_bytes,
+        imap_max_attachments_per_message=attachment_limit_count,
     )
-    return service, repository, imported_mail_repository, provider
+    return service, repository, imported_mail_repository, provider, fake_parser
 
 
-def test_mail_import_creates_case_for_one_message(tmp_path: Path) -> None:
-    service, repository, imported_mail_repository, provider = _service(
+def test_mail_import_creates_email_and_text_artifacts(tmp_path: Path) -> None:
+    parser = _FakeMailContentParser(parsed_content=ParsedMailContent(body_text="Hello body", attachments=()))
+    service, repository, imported_mail_repository, provider, _ = _service(
         tmp_path,
-        (_message("1", b"From: sender@example.com\r\nSubject: One\r\n\r\nhello"),),
+        (_message("1", b"raw message"),),
+        parser=parser,
     )
 
     result = service.import_new_messages()
+    persisted_cases = repository.list()
 
     assert result.imported == 1
     assert result.skipped == 0
@@ -142,14 +176,88 @@ def test_mail_import_creates_case_for_one_message(tmp_path: Path) -> None:
     assert repository.count() == 1
     assert provider.calls == 1
     assert len(imported_mail_repository.records) == 1
-    artifact_paths = list((tmp_path / "artifacts").rglob("*.eml"))
-    assert len(artifact_paths) == 1
+    assert tuple(artifact.artifact_type for artifact in persisted_cases[0].case.artifacts) == (
+        ArtifactType.EMAIL,
+        ArtifactType.TEXT,
+    )
+    assert persisted_cases[0].case.artifacts[1].storage_reference.locator.endswith(".txt")
     repository.close()
 
 
-def test_mail_import_skips_same_uid_on_second_run_without_consuming_number(tmp_path: Path) -> None:
-    message = _message("1", b"From: sender@example.com\r\nSubject: One\r\n\r\nhello")
-    service, repository, imported_mail_repository, provider = _service(tmp_path, (message,))
+def test_mail_import_creates_email_text_and_attachment_artifacts(tmp_path: Path) -> None:
+    parser = _FakeMailContentParser(
+        parsed_content=ParsedMailContent(
+            body_text="Hello body",
+            attachments=(
+                ParsedAttachment(filename="invoice.pdf", content_type="application/pdf", payload=b"PDF"),
+            ),
+        )
+    )
+    service, repository, _, _, _ = _service(tmp_path, (_message("1", b"raw message"),), parser=parser)
+
+    result = service.import_new_messages()
+    persisted_case = repository.list()[0]
+
+    assert result.imported == 1
+    assert tuple(artifact.artifact_type for artifact in persisted_case.case.artifacts) == (
+        ArtifactType.EMAIL,
+        ArtifactType.TEXT,
+        ArtifactType.ATTACHMENT,
+    )
+    assert persisted_case.case.artifacts[2].storage_reference.locator.endswith(".pdf")
+    repository.close()
+
+
+def test_mail_import_preserves_attachment_order(tmp_path: Path) -> None:
+    parser = _FakeMailContentParser(
+        parsed_content=ParsedMailContent(
+            body_text="Hello body",
+            attachments=(
+                ParsedAttachment(filename="one.txt", content_type="text/plain", payload=b"one"),
+                ParsedAttachment(filename="two.bin", content_type="application/octet-stream", payload=b"two"),
+            ),
+        )
+    )
+    service, repository, _, _, _ = _service(tmp_path, (_message("1", b"raw message"),), parser=parser)
+
+    service.import_new_messages()
+    persisted_case = repository.list()[0]
+
+    assert tuple(artifact.artifact_type for artifact in persisted_case.case.artifacts) == (
+        ArtifactType.EMAIL,
+        ArtifactType.TEXT,
+        ArtifactType.ATTACHMENT,
+        ArtifactType.ATTACHMENT,
+    )
+    assert persisted_case.case.artifacts[2].storage_reference.locator.endswith(".txt")
+    assert persisted_case.case.artifacts[3].storage_reference.locator.endswith(".bin")
+    repository.close()
+
+
+def test_mail_import_without_body_creates_only_email_and_attachments(tmp_path: Path) -> None:
+    parser = _FakeMailContentParser(
+        parsed_content=ParsedMailContent(
+            body_text=None,
+            attachments=(
+                ParsedAttachment(filename="invoice.pdf", content_type="application/pdf", payload=b"PDF"),
+            ),
+        )
+    )
+    service, repository, _, _, _ = _service(tmp_path, (_message("1", b"raw message"),), parser=parser)
+
+    service.import_new_messages()
+    persisted_case = repository.list()[0]
+
+    assert tuple(artifact.artifact_type for artifact in persisted_case.case.artifacts) == (
+        ArtifactType.EMAIL,
+        ArtifactType.ATTACHMENT,
+    )
+    repository.close()
+
+
+def test_mail_import_skips_same_uid_without_consuming_number(tmp_path: Path) -> None:
+    message = _message("1", b"raw message")
+    service, repository, imported_mail_repository, provider, _ = _service(tmp_path, (message,))
 
     first_result = service.import_new_messages()
     second_result = service.import_new_messages()
@@ -163,70 +271,143 @@ def test_mail_import_skips_same_uid_on_second_run_without_consuming_number(tmp_p
     repository.close()
 
 
-def test_mail_import_creates_two_cases_for_different_uids_and_content(tmp_path: Path) -> None:
-    service, repository, imported_mail_repository, provider = _service(
-        tmp_path,
-        (
-            _message("1", b"From: sender@example.com\r\nSubject: One\r\n\r\nfirst"),
-            _message("2", b"From: sender@example.com\r\nSubject: Two\r\n\r\nsecond"),
-        ),
+def test_mail_import_reuses_existing_case_for_identical_eml_without_recreating_artifacts(tmp_path: Path) -> None:
+    parser = _FakeMailContentParser(
+        parsed_content=ParsedMailContent(
+            body_text="Hello body",
+            attachments=(
+                ParsedAttachment(filename="invoice.pdf", content_type="application/pdf", payload=b"PDF"),
+            ),
+        )
     )
-
-    result = service.import_new_messages()
-
-    assert result.imported == 2
-    assert repository.count() == 2
-    assert provider.calls == 2
-    assert len(imported_mail_repository.records) == 2
-    repository.close()
-
-
-def test_mail_import_reuses_existing_case_for_identical_content_with_different_uids(tmp_path: Path) -> None:
-    raw_message = b"From: sender@example.com\r\nSubject: Same\r\n\r\nbody"
-    service, repository, imported_mail_repository, provider = _service(
+    raw_message = b"same eml"
+    service, repository, imported_mail_repository, provider, fake_parser = _service(
         tmp_path,
         (
             _message("1", raw_message, "<one@example.com>"),
             _message("2", raw_message, "<two@example.com>"),
         ),
+        parser=parser,
     )
 
     result = service.import_new_messages()
+    persisted_case = repository.list()[0]
 
     assert result.imported == 2
     assert repository.count() == 1
     assert provider.calls == 1
+    assert fake_parser.calls == 1
     assert len(imported_mail_repository.records) == 2
-    assert imported_mail_repository.records[0][3] == imported_mail_repository.records[1][3]
-    artifact_paths = list((tmp_path / "artifacts").rglob("*.eml"))
-    assert len(artifact_paths) == 1
+    assert tuple(artifact.artifact_type for artifact in persisted_case.case.artifacts) == (
+        ArtifactType.EMAIL,
+        ArtifactType.TEXT,
+        ArtifactType.ATTACHMENT,
+    )
+    artifact_paths = list((tmp_path / "artifacts").rglob("*"))
+    stored_files = [path for path in artifact_paths if path.is_file()]
+    assert len(stored_files) == 3
     repository.close()
 
 
-def test_mail_import_continues_after_one_message_failure(tmp_path: Path) -> None:
-    service, repository, imported_mail_repository, provider = _service(
+def test_mail_import_parser_error_marks_message_as_failed(tmp_path: Path) -> None:
+    parser = _FakeMailContentParser(exception=RuntimeError("parse failed"))
+    service, repository, imported_mail_repository, provider, _ = _service(
         tmp_path,
-        (
-            _message("1", b"broken", "<broken@example.com>"),
-            _message("2", b"From: sender@example.com\r\nSubject: Two\r\n\r\nsecond", "<ok@example.com>"),
-        ),
+        (_message("1", b"raw message"),),
+        parser=parser,
     )
-    service.storage = _FailingStorage(delegate=FilesystemStorage(root_directory=tmp_path))
 
     result = service.import_new_messages()
 
-    assert result.imported == 1
+    assert result.imported == 0
     assert result.failed == 1
-    assert result.skipped == 0
-    assert repository.count() == 1
-    assert provider.calls == 1
-    assert len(imported_mail_repository.records) == 1
-    assert imported_mail_repository.records[0][1] == "2"
+    assert repository.count() == 0
+    assert provider.calls == 0
+    assert imported_mail_repository.records == []
+    repository.close()
+
+
+def test_mail_import_attachment_storage_error_does_not_save_case_or_import_record(tmp_path: Path) -> None:
+    parser = _FakeMailContentParser(
+        parsed_content=ParsedMailContent(
+            body_text="Hello body",
+            attachments=(
+                ParsedAttachment(filename="invoice.pdf", content_type="application/pdf", payload=b"PDF"),
+            ),
+        )
+    )
+    service, repository, imported_mail_repository, provider, _ = _service(
+        tmp_path,
+        (_message("1", b"raw message"),),
+        parser=parser,
+    )
+    service.storage = _FailingStorage(delegate=FilesystemStorage(root_directory=tmp_path), failing_suffix=".pdf")
+
+    result = service.import_new_messages()
+
+    assert result.imported == 0
+    assert result.failed == 1
+    assert repository.count() == 0
+    assert provider.calls == 0
+    assert imported_mail_repository.records == []
+    repository.close()
+
+
+def test_mail_import_rejects_attachment_size_limit(tmp_path: Path) -> None:
+    parser = _FakeMailContentParser(
+        parsed_content=ParsedMailContent(
+            body_text="Hello body",
+            attachments=(
+                ParsedAttachment(filename="large.bin", content_type="application/octet-stream", payload=b"x" * 11),
+            ),
+        )
+    )
+    service, repository, imported_mail_repository, provider, _ = _service(
+        tmp_path,
+        (_message("1", b"raw message"),),
+        parser=parser,
+        attachment_limit_bytes=10,
+    )
+
+    result = service.import_new_messages()
+
+    assert result.imported == 0
+    assert result.failed == 1
+    assert repository.count() == 0
+    assert provider.calls == 0
+    assert imported_mail_repository.records == []
+    repository.close()
+
+
+def test_mail_import_rejects_attachment_count_limit(tmp_path: Path) -> None:
+    parser = _FakeMailContentParser(
+        parsed_content=ParsedMailContent(
+            body_text="Hello body",
+            attachments=(
+                ParsedAttachment(filename="one.bin", content_type="application/octet-stream", payload=b"1"),
+                ParsedAttachment(filename="two.bin", content_type="application/octet-stream", payload=b"2"),
+            ),
+        )
+    )
+    service, repository, imported_mail_repository, provider, _ = _service(
+        tmp_path,
+        (_message("1", b"raw message"),),
+        parser=parser,
+        attachment_limit_count=1,
+    )
+
+    result = service.import_new_messages()
+
+    assert result.imported == 0
+    assert result.failed == 1
+    assert repository.count() == 0
+    assert provider.calls == 0
+    assert imported_mail_repository.records == []
     repository.close()
 
 
 def test_mail_import_does_not_save_import_record_after_failed_case_save(tmp_path: Path) -> None:
-    raw_message = b"From: sender@example.com\r\nSubject: Same\r\n\r\nbody"
+    raw_message = b"same eml"
     storage = FilesystemStorage(root_directory=tmp_path)
     existing_source = tmp_path / "existing.eml"
     existing_source.write_bytes(raw_message)
@@ -241,6 +422,7 @@ def test_mail_import_does_not_save_import_record_after_failed_case_save(tmp_path
     )
     imported_mail_repository = _FakeImportedMailRepository()
     provider = _CountingNumberProvider()
+    parser = _FakeMailContentParser(parsed_content=ParsedMailContent(body_text="Hello body", attachments=()))
     service = MailImportService(
         mailbox_client=_FakeMailboxClient(messages=(_message("2", raw_message, "<two@example.com>"),)),
         imported_mail_repository=imported_mail_repository,
@@ -248,6 +430,7 @@ def test_mail_import_does_not_save_import_record_after_failed_case_save(tmp_path
         case_factory=CaseFactory(),
         case_repository=_ConflictCaseRepository(persisted_case=persisted_case),
         case_number_provider=provider,
+        mail_content_parser=parser,
     )
 
     result = service.import_new_messages()
@@ -258,10 +441,19 @@ def test_mail_import_does_not_save_import_record_after_failed_case_save(tmp_path
     assert len(imported_mail_repository.records) == 1
 
 
-def test_mail_import_persists_email_artifact_type_after_repository_reopen(tmp_path: Path) -> None:
-    service, repository, imported_mail_repository, provider = _service(
+def test_mail_import_persists_email_text_and_attachment_types_after_repository_reopen(tmp_path: Path) -> None:
+    parser = _FakeMailContentParser(
+        parsed_content=ParsedMailContent(
+            body_text="Hello body",
+            attachments=(
+                ParsedAttachment(filename="invoice.pdf", content_type="application/pdf", payload=b"PDF"),
+            ),
+        )
+    )
+    service, repository, imported_mail_repository, provider, _ = _service(
         tmp_path,
-        (_message("1", b"From: sender@example.com\r\nSubject: One\r\n\r\nhello", "<one@example.com>"),),
+        (_message("1", b"raw message", "<one@example.com>"),),
+        parser=parser,
     )
 
     result = service.import_new_messages()
@@ -273,8 +465,14 @@ def test_mail_import_persists_email_artifact_type_after_repository_reopen(tmp_pa
     persisted_cases = reloaded_repository.list()
 
     assert len(persisted_cases) == 1
-    assert persisted_cases[0].case.artifacts[0].artifact_type is ArtifactType.EMAIL
+    assert tuple(artifact.artifact_type for artifact in persisted_cases[0].case.artifacts) == (
+        ArtifactType.EMAIL,
+        ArtifactType.TEXT,
+        ArtifactType.ATTACHMENT,
+    )
     assert persisted_cases[0].case.artifacts[0].storage_reference.locator.endswith(".eml")
+    assert persisted_cases[0].case.artifacts[1].storage_reference.locator.endswith(".txt")
+    assert persisted_cases[0].case.artifacts[2].storage_reference.locator.endswith(".pdf")
     assert len(imported_mail_repository.records) == 1
     assert provider.calls == 1
     reloaded_repository.close()
