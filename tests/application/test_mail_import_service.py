@@ -256,3 +256,25 @@ def test_mail_import_does_not_save_import_record_after_failed_case_save(tmp_path
     assert result.failed == 0
     assert provider.calls == 1
     assert len(imported_mail_repository.records) == 1
+
+
+def test_mail_import_persists_email_artifact_type_after_repository_reopen(tmp_path: Path) -> None:
+    service, repository, imported_mail_repository, provider = _service(
+        tmp_path,
+        (_message("1", b"From: sender@example.com\r\nSubject: One\r\n\r\nhello", "<one@example.com>"),),
+    )
+
+    result = service.import_new_messages()
+
+    assert result.imported == 1
+    repository.close()
+
+    reloaded_repository = SQLiteCaseRepository(database_path=tmp_path / "storage" / "aioffice.db")
+    persisted_cases = reloaded_repository.list()
+
+    assert len(persisted_cases) == 1
+    assert persisted_cases[0].case.artifacts[0].artifact_type is ArtifactType.EMAIL
+    assert persisted_cases[0].case.artifacts[0].storage_reference.locator.endswith(".eml")
+    assert len(imported_mail_repository.records) == 1
+    assert provider.calls == 1
+    reloaded_repository.close()

@@ -54,18 +54,39 @@ class SQLiteCaseRepository(CaseRepository):
                     if existing_row is not None
                     else datetime.now(UTC).isoformat(timespec="seconds")
                 )
-                artifact_locator = case.artifacts[0].storage_reference.locator if case.artifacts else None
+                if case.artifacts:
+                    primary_artifact = case.artifacts[0]
+                    artifact_locator = primary_artifact.storage_reference.locator
+                    artifact_type = primary_artifact.artifact_type.value
+                else:
+                    artifact_locator = None
+                    artifact_type = None
                 self._connection.execute(
                     """
-                    INSERT INTO cases (id, reference_number, status, created_at, primary_artifact_locator)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO cases (
+                        id,
+                        reference_number,
+                        status,
+                        created_at,
+                        primary_artifact_locator,
+                        primary_artifact_type
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         reference_number = excluded.reference_number,
                         status = excluded.status,
                         created_at = excluded.created_at,
-                        primary_artifact_locator = excluded.primary_artifact_locator
+                        primary_artifact_locator = excluded.primary_artifact_locator,
+                        primary_artifact_type = excluded.primary_artifact_type
                     """,
-                    (str(case.id), reference_number, self.default_status, created_at, artifact_locator),
+                    (
+                        str(case.id),
+                        reference_number,
+                        self.default_status,
+                        created_at,
+                        artifact_locator,
+                        artifact_type,
+                    ),
                 )
                 self._connection.commit()
             except sqlite3.IntegrityError as error:
@@ -80,7 +101,17 @@ class SQLiteCaseRepository(CaseRepository):
 
         with self._lock:
             row = self._connection.execute(
-                "SELECT id, reference_number, status, created_at, primary_artifact_locator FROM cases WHERE id = ?",
+                """
+                SELECT
+                    id,
+                    reference_number,
+                    status,
+                    created_at,
+                    primary_artifact_locator,
+                    primary_artifact_type
+                FROM cases
+                WHERE id = ?
+                """,
                 (str(case_id),),
             ).fetchone()
             if row is None:
@@ -93,7 +124,13 @@ class SQLiteCaseRepository(CaseRepository):
         with self._lock:
             row = self._connection.execute(
                 """
-                SELECT id, reference_number, status, created_at, primary_artifact_locator
+                SELECT
+                    id,
+                    reference_number,
+                    status,
+                    created_at,
+                    primary_artifact_locator,
+                    primary_artifact_type
                 FROM cases
                 WHERE primary_artifact_locator = ?
                 LIMIT 1
@@ -110,7 +147,13 @@ class SQLiteCaseRepository(CaseRepository):
         with self._lock:
             rows = self._connection.execute(
                 """
-                SELECT id, reference_number, status, created_at, primary_artifact_locator
+                SELECT
+                    id,
+                    reference_number,
+                    status,
+                    created_at,
+                    primary_artifact_locator,
+                    primary_artifact_type
                 FROM cases
                 ORDER BY reference_number ASC
                 """,
@@ -129,8 +172,10 @@ class SQLiteCaseRepository(CaseRepository):
     def _build_persisted_case(self, row: sqlite3.Row) -> PersistedCase:
         case = Case(id=Identifier.from_string(row["id"]))
         if row["primary_artifact_locator"] is not None:
+            artifact_type_value = row["primary_artifact_type"] or ArtifactType.PDF.value
+            artifact_type = ArtifactType(artifact_type_value)
             artifact = Artifact(
-                artifact_type=ArtifactType.PDF,
+                artifact_type=artifact_type,
                 storage_reference=StorageReference(
                     storage_name="filesystem",
                     locator=row["primary_artifact_locator"],
@@ -158,7 +203,8 @@ class SQLiteCaseRepository(CaseRepository):
                     reference_number INTEGER UNIQUE NOT NULL,
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    primary_artifact_locator TEXT
+                    primary_artifact_locator TEXT,
+                    primary_artifact_type TEXT
                 )
                 """
             )
@@ -179,6 +225,17 @@ class SQLiteCaseRepository(CaseRepository):
                 )
             if "primary_artifact_locator" not in columns:
                 self._connection.execute("ALTER TABLE cases ADD COLUMN primary_artifact_locator TEXT")
+            if "primary_artifact_type" not in columns:
+                self._connection.execute("ALTER TABLE cases ADD COLUMN primary_artifact_type TEXT")
+                self._connection.execute(
+                    """
+                    UPDATE cases
+                    SET primary_artifact_type = ?
+                    WHERE primary_artifact_locator IS NOT NULL
+                      AND primary_artifact_type IS NULL
+                    """,
+                    (ArtifactType.PDF.value,),
+                )
             self._connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS ix_cases_primary_artifact_locator

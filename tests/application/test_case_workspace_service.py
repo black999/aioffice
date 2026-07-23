@@ -77,3 +77,31 @@ def test_case_workspace_service_returns_none_for_invalid_uuid() -> None:
     workspace = service.get_case_workspace("not-a-uuid")
 
     assert workspace is None
+
+
+def test_case_workspace_service_returns_email_artifact_label() -> None:
+    case = Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+    case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.EMAIL,
+            storage_reference=StorageReference(
+                storage_name="filesystem",
+                locator="artifacts/aa/bb/sample.eml",
+            ),
+        )
+    )
+    repository = _FakeCaseRepository(
+        persisted_case=PersistedCase(
+            case=case,
+            reference_number=1,
+            status="open",
+            created_at="2026-07-23T14:15:00+00:00",
+        )
+    )
+    service = CaseWorkspaceService(repository=repository)
+
+    workspace = service.get_case_workspace("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    assert workspace is not None
+    assert workspace.artifacts[0].artifact_type == "EMAIL"
+    assert workspace.artifacts[0].locator == "artifacts/aa/bb/sample.eml"

@@ -93,6 +93,7 @@ def test_get_by_artifact_locator_returns_existing_case(tmp_path: Path) -> None:
 
     assert loaded_case is not None
     assert loaded_case.case.id == case.id
+    assert loaded_case.case.artifacts[0].artifact_type is ArtifactType.PDF
     repository.close()
 
 
@@ -149,6 +150,91 @@ def test_repository_rejects_duplicate_non_empty_locator(tmp_path: Path) -> None:
         repository.save(second_case, reference_number=2)
 
     repository.close()
+
+
+def test_pdf_artifact_keeps_pdf_type_after_reloading(tmp_path: Path) -> None:
+    database_path = tmp_path / "storage" / "aioffice.db"
+    repository = SQLiteCaseRepository(database_path=database_path)
+    case_id = Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    case = Case(id=case_id)
+    case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.PDF,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.pdf"),
+        )
+    )
+    repository.save(case, reference_number=1)
+    repository.close()
+
+    reloaded_repository = SQLiteCaseRepository(database_path=database_path)
+    loaded_case = reloaded_repository.get(case_id)
+
+    assert loaded_case is not None
+    assert loaded_case.case.artifacts[0].artifact_type is ArtifactType.PDF
+    reloaded_repository.close()
+
+
+def test_email_artifact_keeps_email_type_after_reloading(tmp_path: Path) -> None:
+    database_path = tmp_path / "storage" / "aioffice.db"
+    repository = SQLiteCaseRepository(database_path=database_path)
+    case_id = Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    case = Case(id=case_id)
+    case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.EMAIL,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.eml"),
+        )
+    )
+    repository.save(case, reference_number=1)
+    repository.close()
+
+    reloaded_repository = SQLiteCaseRepository(database_path=database_path)
+    loaded_case = reloaded_repository.get(case_id)
+
+    assert loaded_case is not None
+    assert loaded_case.case.artifacts[0].artifact_type is ArtifactType.EMAIL
+    reloaded_repository.close()
+
+
+def test_list_keeps_primary_artifact_type(tmp_path: Path) -> None:
+    repository = SQLiteCaseRepository(database_path=tmp_path / "storage" / "aioffice.db")
+    pdf_case = Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+    pdf_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.PDF,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/file.pdf"),
+        )
+    )
+    email_case = Case(id=Identifier.from_string("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
+    email_case.add_artifact(
+        Artifact(
+            artifact_type=ArtifactType.EMAIL,
+            storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/cc/dd/file.eml"),
+        )
+    )
+    repository.save(pdf_case, reference_number=1)
+    repository.save(email_case, reference_number=2)
+
+    cases = repository.list()
+
+    assert cases[0].case.artifacts[0].artifact_type is ArtifactType.PDF
+    assert cases[1].case.artifacts[0].artifact_type is ArtifactType.EMAIL
+    repository.close()
+
+
+def test_case_without_artifact_still_round_trips(tmp_path: Path) -> None:
+    database_path = tmp_path / "storage" / "aioffice.db"
+    repository = SQLiteCaseRepository(database_path=database_path)
+    case_id = Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    repository.save(Case(id=case_id), reference_number=1)
+    repository.close()
+
+    reloaded_repository = SQLiteCaseRepository(database_path=database_path)
+    loaded_case = reloaded_repository.get(case_id)
+
+    assert loaded_case is not None
+    assert loaded_case.case.artifacts == ()
+    reloaded_repository.close()
 
 
 def test_repository_propagates_reference_number_integrity_error(tmp_path: Path) -> None:
@@ -238,3 +324,64 @@ def test_repository_migration_raises_for_existing_duplicate_locators(tmp_path: P
     else:
         msg = "expected RuntimeError for duplicate locator migration"
         raise AssertionError(msg)
+
+
+def test_repository_migration_adds_primary_artifact_type_and_backfills_pdf(tmp_path: Path) -> None:
+    database_path = tmp_path / "storage" / "aioffice.db"
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        CREATE TABLE cases (
+            id TEXT PRIMARY KEY,
+            reference_number INTEGER UNIQUE NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            primary_artifact_locator TEXT
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO cases (id, reference_number, status, created_at, primary_artifact_locator) VALUES (?, ?, ?, ?, ?)",
+        (
+            "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            1,
+            "open",
+            "2026-07-22T12:00:00+00:00",
+            "artifacts/aa/bb/file.pdf",
+        ),
+    )
+    connection.execute(
+        "INSERT INTO cases (id, reference_number, status, created_at, primary_artifact_locator) VALUES (?, ?, ?, ?, ?)",
+        (
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            2,
+            "open",
+            "2026-07-22T12:01:00+00:00",
+            None,
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    repository = SQLiteCaseRepository(database_path=database_path)
+    repository.close()
+
+    migrated_connection = sqlite3.connect(database_path)
+    migrated_connection.row_factory = sqlite3.Row
+    columns = {
+        row["name"]
+        for row in migrated_connection.execute("PRAGMA table_info(cases)").fetchall()
+    }
+    rows = migrated_connection.execute(
+        """
+        SELECT id, primary_artifact_locator, primary_artifact_type
+        FROM cases
+        ORDER BY reference_number ASC
+        """
+    ).fetchall()
+    migrated_connection.close()
+
+    assert "primary_artifact_type" in columns
+    assert rows[0]["primary_artifact_type"] == "pdf"
+    assert rows[1]["primary_artifact_type"] is None
