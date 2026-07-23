@@ -27,6 +27,9 @@ class CaseRepository(Protocol):
     def get(self, case_id: Identifier) -> PersistedCase | None:
         """Load a case by identifier."""
 
+    def get_by_artifact_locator(self, locator: str) -> PersistedCase | None:
+        """Load a case by its primary artifact locator."""
+
     def list(self) -> tuple[PersistedCase, ...]:
         """List all persisted cases."""
 

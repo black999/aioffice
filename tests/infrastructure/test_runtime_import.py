@@ -83,6 +83,50 @@ def test_existing_pdf_is_imported_during_runtime_startup(tmp_path: Path) -> None
     assert not source_path.exists()
 
 
+def test_runtime_deduplicates_identical_documents_by_content(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    with TestClient(create_app(settings)) as client:
+        first_source = settings.incoming_directory / "offer.pdf"
+        first_source.write_bytes(b"same-content")
+
+        def first_file_processed() -> bool:
+            return (settings.processed_directory / "offer.pdf").exists()
+
+        wait_until(first_file_processed)
+
+        second_source = settings.incoming_directory / "copy-of-offer.pdf"
+        second_source.write_bytes(b"same-content")
+
+        def second_file_processed() -> bool:
+            return (settings.processed_directory / "copy-of-offer.pdf").exists()
+
+        wait_until(second_file_processed)
+
+        third_source = settings.incoming_directory / "second.pdf"
+        third_source.write_bytes(b"different-content")
+
+        def second_case_visible() -> bool:
+            response = client.get("/")
+            return "CASE-000002" in response.text and "Number of Cases:</strong> 2" in response.text
+
+        wait_until(second_case_visible)
+
+        dashboard = client.get("/")
+
+        assert dashboard.status_code == 200
+        assert "Number of Cases:</strong> 2" in dashboard.text
+        assert dashboard.text.count("CASE-000001") == 1
+        assert dashboard.text.count("CASE-000002") == 1
+        assert (settings.processed_directory / "offer.pdf").exists()
+        assert (settings.processed_directory / "copy-of-offer.pdf").exists()
+        assert (settings.processed_directory / "second.pdf").exists()
+        assert not first_source.exists()
+        assert not second_source.exists()
+        assert not third_source.exists()
+        artifact_files = list(settings.artifacts_directory.rglob("*.pdf"))
+        assert len(artifact_files) == 2
+
+
 def test_non_pdf_is_ignored_by_runtime(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     with TestClient(create_app(settings)) as client:

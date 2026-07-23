@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,18 +26,24 @@ class DocumentImportService:
         """Store a PDF, create a case, and persist it if it is new."""
 
         storage_reference = self.storage.store_file(source_path)
-        if self._has_storage_reference(storage_reference.locator):
-            return None
+        existing_case = self.case_repository.get_by_artifact_locator(storage_reference.locator)
+        if existing_case is not None:
+            return existing_case.case
 
         artifact = Artifact(artifact_type=ArtifactType.PDF, storage_reference=storage_reference)
-        case = self.case_factory.create_from_artifact(artifact)
         reference_number = self.case_number_provider.next_number()
-        self.case_repository.save(case, reference_number)
+        case = self.case_factory.create_from_artifact(artifact)
+        try:
+            self.case_repository.save(case, reference_number)
+        except sqlite3.IntegrityError as error:
+            if not self._is_locator_conflict(error):
+                raise
+            existing_case = self.case_repository.get_by_artifact_locator(storage_reference.locator)
+            if existing_case is None:
+                raise
+            return existing_case.case
         return case
 
-    def _has_storage_reference(self, locator: str) -> bool:
-        return any(
-            artifact.storage_reference.locator == locator
-            for persisted_case in self.case_repository.list()
-            for artifact in persisted_case.case.artifacts
-        )
+    def _is_locator_conflict(self, error: sqlite3.IntegrityError) -> bool:
+        message = str(error)
+        return "cases.primary_artifact_locator" in message or "ux_cases_primary_artifact_locator" in message

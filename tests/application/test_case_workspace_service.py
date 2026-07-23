@@ -20,6 +20,15 @@ class _FakeCaseRepository(CaseRepository):
             return None
         return self.persisted_case
 
+    def get_by_artifact_locator(self, locator: str) -> PersistedCase | None:
+        if self.persisted_case is None:
+            return None
+        if not self.persisted_case.case.artifacts:
+            return None
+        if self.persisted_case.case.artifacts[0].storage_reference.locator != locator:
+            return None
+        return self.persisted_case
+
     def list(self) -> tuple[PersistedCase, ...]:
         if self.persisted_case is None:
             return ()

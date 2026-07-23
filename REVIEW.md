@@ -36,7 +36,10 @@
 - There is no retry mechanism yet.
 - A move failure after a successful import can leave a saved case in SQLite while the source file remains in `incoming`.
 - Re-copying the same file into `incoming` can still trigger another import attempt path.
-- Storage deduplication does not yet mean full case deduplication across the whole workflow.
+- Deduplication is based on the full SHA-256 of file content.
+- Changing even a single byte creates a new document.
+- There is no manual workflow yet for merging already duplicated cases.
+- Files in `processed` are not cleaned up automatically.
 - Dashboard updates still require a manual refresh.
 
 No architectural change proposed.

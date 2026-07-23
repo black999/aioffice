@@ -197,7 +197,7 @@ def test_process_path_moves_file_to_processed_and_returns_case(tmp_path: Path) -
     repository.close()
 
 
-def test_duplicate_pdf_creates_no_second_case_and_moves_source_file(tmp_path: Path) -> None:
+def test_duplicate_pdf_returns_existing_case_and_moves_source_file(tmp_path: Path) -> None:
     watch_directory = tmp_path / "incoming"
     watch_directory.mkdir()
     first_pdf = watch_directory / "offer.pdf"
@@ -210,7 +210,8 @@ def test_duplicate_pdf_creates_no_second_case_and_moves_source_file(tmp_path: Pa
     second_case = watch_folder.process_path(second_pdf)
 
     assert first_case is not None
-    assert second_case is None
+    assert second_case is not None
+    assert second_case.id == first_case.id
     assert repository.count() == 1
     assert not second_pdf.exists()
     assert (tmp_path / "processed" / "renamed.pdf").exists()

@@ -45,6 +45,10 @@ uv run aioffice
 4. Successfully imported files are moved to `AIOFFICE_DATA_DIR/processed`.
 5. Files that fail during import remain in `AIOFFICE_DATA_DIR/incoming`.
 
+AI Office deduplicates imported documents by file content.
+Importing identical PDF content again does not create another case.
+The original filename does not affect deduplication.
+
 Example on Ubuntu:
 
 ```bash

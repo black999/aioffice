@@ -16,6 +16,17 @@ class _FakeCaseRepository(CaseRepository):
     def get(self, case_id: Identifier) -> PersistedCase | None:
         return next((case for case in self.cases if case.case.id == case_id), None)
 
+    def get_by_artifact_locator(self, locator: str) -> PersistedCase | None:
+        return next(
+            (
+                persisted_case
+                for persisted_case in self.cases
+                if persisted_case.case.artifacts
+                and persisted_case.case.artifacts[0].storage_reference.locator == locator
+            ),
+            None,
+        )
+
     def list(self) -> tuple[PersistedCase, ...]:
         return self.cases
 

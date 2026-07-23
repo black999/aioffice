@@ -75,6 +75,23 @@ class SQLiteCaseRepository(CaseRepository):
                 return None
             return self._build_persisted_case(row)
 
+    def get_by_artifact_locator(self, locator: str) -> PersistedCase | None:
+        """Load a persisted case by its primary artifact locator."""
+
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT id, reference_number, status, created_at, primary_artifact_locator
+                FROM cases
+                WHERE primary_artifact_locator = ?
+                LIMIT 1
+                """,
+                (locator,),
+            ).fetchone()
+            if row is None:
+                return None
+            return self._build_persisted_case(row)
+
     def list(self) -> tuple[PersistedCase, ...]:
         """List all persisted cases."""
 
@@ -146,6 +163,36 @@ class SQLiteCaseRepository(CaseRepository):
                 )
             if "primary_artifact_locator" not in columns:
                 self._connection.execute("ALTER TABLE cases ADD COLUMN primary_artifact_locator TEXT")
+            self._connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS ix_cases_primary_artifact_locator
+                ON cases(primary_artifact_locator)
+                """
+            )
+            duplicate_locator_row = self._connection.execute(
+                """
+                SELECT primary_artifact_locator
+                FROM cases
+                WHERE primary_artifact_locator IS NOT NULL
+                GROUP BY primary_artifact_locator
+                HAVING COUNT(*) > 1
+                LIMIT 1
+                """
+            ).fetchone()
+            if duplicate_locator_row is not None:
+                duplicate_locator = str(duplicate_locator_row["primary_artifact_locator"])
+                msg = (
+                    "Cannot create unique locator index because duplicate "
+                    f"primary_artifact_locator values already exist: {duplicate_locator}"
+                )
+                raise RuntimeError(msg)
+            self._connection.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_cases_primary_artifact_locator
+                ON cases(primary_artifact_locator)
+                WHERE primary_artifact_locator IS NOT NULL
+                """
+            )
             self._connection.commit()
 
 
