@@ -13,6 +13,7 @@ from aioffice.domain import Identifier
 
 MAX_REPLY_DRAFT_SUBJECT_CHARS = 200
 MAX_REPLY_DRAFT_BODY_CHARS = 20_000
+MAX_APPROVER_NAME_CHARS = 200
 
 
 class ReplyDraftGenerationError(RuntimeError):
@@ -28,6 +29,7 @@ class ReplyDraftStatus(StrEnum):
 
     GENERATED = "generated"
     EDITED = "edited"
+    APPROVED = "approved"
 
 
 def _normalize_text(value: object, *, field_name: str, max_chars: int, trim: bool) -> str:
@@ -58,6 +60,17 @@ def normalize_operator_instruction(value: str | None, *, max_chars: int) -> str 
         msg = f"operator_instruction must be at most {max_chars} characters long"
         raise ValueError(msg)
     return normalized
+
+
+def normalize_approver_name(value: str) -> str:
+    """Normalize a manually entered approver name."""
+
+    return _normalize_text(
+        value,
+        field_name="approved_by",
+        max_chars=MAX_APPROVER_NAME_CHARS,
+        trim=False,
+    )
 
 
 def validate_reply_draft_timestamp(value: str) -> str:
@@ -116,6 +129,8 @@ class PersistedReplyDraft:
     status: ReplyDraftStatus
     model_name: str
     operator_instruction: str | None
+    approved_by: str | None
+    approved_at: str | None
     created_at: str
     updated_at: str
 
@@ -149,8 +164,33 @@ class PersistedReplyDraft:
             "operator_instruction",
             None if self.operator_instruction is None else self.operator_instruction.replace("\x00", "").strip() or None,
         )
+        object.__setattr__(
+            self,
+            "approved_by",
+            None if self.approved_by is None else normalize_approver_name(self.approved_by),
+        )
+        object.__setattr__(
+            self,
+            "approved_at",
+            None if self.approved_at is None else validate_reply_draft_timestamp(self.approved_at),
+        )
         object.__setattr__(self, "created_at", validate_reply_draft_timestamp(self.created_at))
         object.__setattr__(self, "updated_at", validate_reply_draft_timestamp(self.updated_at))
+        self._validate_approval_consistency()
+
+    def _validate_approval_consistency(self) -> None:
+        if self.status is ReplyDraftStatus.APPROVED:
+            if self.approved_by is None:
+                msg = "approved drafts must define approved_by"
+                raise ValueError(msg)
+            if self.approved_at is None:
+                msg = "approved drafts must define approved_at"
+                raise ValueError(msg)
+            return
+
+        if self.approved_by is not None or self.approved_at is not None:
+            msg = "non-approved drafts must not define approval metadata"
+            raise ValueError(msg)
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +241,8 @@ def build_persisted_reply_draft(
     operator_instruction: str | None,
     existing_draft: PersistedReplyDraft | None = None,
     status: ReplyDraftStatus = ReplyDraftStatus.GENERATED,
+    approved_by: str | None = None,
+    approved_at: str | None = None,
     created_at: str | None = None,
     updated_at: str | None = None,
 ) -> PersistedReplyDraft:
@@ -214,6 +256,8 @@ def build_persisted_reply_draft(
         status=status,
         model_name=generated_draft.model_name,
         operator_instruction=operator_instruction,
+        approved_by=approved_by,
+        approved_at=approved_at,
         created_at=created_at or (existing_draft.created_at if existing_draft is not None else timestamp),
         updated_at=timestamp,
     )
@@ -247,4 +291,5 @@ def format_reply_draft_status_label(status: ReplyDraftStatus) -> str:
     return {
         ReplyDraftStatus.GENERATED: "Wygenerowany",
         ReplyDraftStatus.EDITED: "Edytowany",
+        ReplyDraftStatus.APPROVED: "Zatwierdzony",
     }[status]

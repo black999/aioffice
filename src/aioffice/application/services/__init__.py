@@ -14,6 +14,7 @@ from .case_workspace_service import (
 from .document_extraction_service import DocumentExtractionService
 from .document_import_service import DocumentImportService
 from .mail_import_service import MailImportService
+from .reply_draft_approval_service import ReplyDraftApprovalService
 from .reply_draft_editing_service import ReplyDraftEditingService
 from .reply_draft_generation_service import ReplyDraftGenerationService
 
@@ -30,6 +31,7 @@ __all__ = [
     "DocumentImportService",
     "HistoryEntry",
     "MailImportService",
+    "ReplyDraftApprovalService",
     "ReplyDraftEditingService",
     "ReplyDraftGenerationService",
     "ReplyDraftSummary",

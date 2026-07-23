@@ -11,6 +11,7 @@ from aioffice.application import (
     CaseRepository,
     DownloadableArtifact,
     ReplyDraftRepository,
+    ReplyDraftStatus,
     format_case_category_label,
     format_confidence_percent,
     format_reply_draft_status_label,
@@ -63,6 +64,9 @@ class ReplyDraftSummary:
     status_label: str
     model_name: str
     operator_instruction: str | None
+    approved_by: str | None
+    approved_at: str | None
+    is_approved: bool
     created_at: str
     updated_at: str
 
@@ -174,6 +178,9 @@ class CaseWorkspaceService:
                     status_label=format_reply_draft_status_label(persisted_reply_draft.status),
                     model_name=persisted_reply_draft.model_name,
                     operator_instruction=persisted_reply_draft.operator_instruction,
+                    approved_by=persisted_reply_draft.approved_by,
+                    approved_at=persisted_reply_draft.approved_at,
+                    is_approved=persisted_reply_draft.status is ReplyDraftStatus.APPROVED,
                     created_at=persisted_reply_draft.created_at,
                     updated_at=persisted_reply_draft.updated_at,
                 )

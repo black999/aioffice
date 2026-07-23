@@ -36,6 +36,7 @@ from .mail import (
 )
 from .repositories import ArtifactLocatorConflictError, CaseRepository, PersistedCase
 from .reply_drafts import (
+    MAX_APPROVER_NAME_CHARS,
     MAX_REPLY_DRAFT_BODY_CHARS,
     MAX_REPLY_DRAFT_SUBJECT_CHARS,
     GeneratedReplyDraft,
@@ -48,6 +49,7 @@ from .reply_drafts import (
     ReplyDraftStatus,
     build_persisted_reply_draft,
     format_reply_draft_status_label,
+    normalize_approver_name,
     normalize_operator_instruction,
     validate_manual_reply_draft_body,
     validate_manual_reply_draft_subject,
@@ -79,6 +81,7 @@ __all__ = [
     "format_confidence_percent",
     "format_reply_draft_status_label",
     "GeneratedReplyDraft",
+    "MAX_APPROVER_NAME_CHARS",
     "MailContentParser",
     "MAX_CLASSIFICATION_RATIONALE_CHARS",
     "MAX_REPLY_DRAFT_BODY_CHARS",
@@ -103,6 +106,7 @@ __all__ = [
     "build_persisted_reply_draft",
     "ensure_unique_display_name",
     "format_case_reference",
+    "normalize_approver_name",
     "normalize_operator_instruction",
     "normalize_rationale",
     "sanitize_display_name",

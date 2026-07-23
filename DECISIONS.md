@@ -37,3 +37,13 @@
 - Regeneration replaces the current draft and keeps the original creation timestamp.
 
 - Ollama remains an Infrastructure adapter and Application owns the generation rules.
+
+- Approval applies only to the current persisted draft version.
+
+- Any content change invalidates approval immediately.
+
+- Approval history is out of scope for MVP.
+
+- The approver identity is declarative until authentication exists.
+
+- `approved` does not trigger email sending or any other automatic action.

@@ -231,7 +231,13 @@ Notes:
 - the user can provide a short operator instruction,
 - the generated draft is stored in SQLite as one current draft per case,
 - manual editing is allowed and changes the status to `edited`,
+- the current draft can be manually approved in the UI,
+- the approver name is entered manually and is not authenticated,
+- editing an approved draft clears the current approval,
 - regenerating replaces the current draft,
+- regenerating an approved draft also clears the current approval,
+- revoking approval keeps the current draft content and changes the status back to `edited`,
+- `approved` means only an internal approval of the current draft version,
 - no email is sent automatically,
 - the model can hallucinate and every draft must be verified by a human,
 - confidential data should not be sent to an external Ollama endpoint.

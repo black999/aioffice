@@ -89,6 +89,8 @@ def test_case_dashboard_service_includes_reply_draft_statuses_without_n_plus_one
                 status=ReplyDraftStatus.GENERATED,
                 model_name="qwen3:4b",
                 operator_instruction=None,
+                approved_by=None,
+                approved_at=None,
                 created_at="2026-07-23T10:00:00+00:00",
                 updated_at="2026-07-23T10:00:00+00:00",
             )
@@ -120,6 +122,8 @@ def test_case_workspace_service_includes_reply_draft_summary() -> None:
         status=ReplyDraftStatus.EDITED,
         model_name="qwen3:4b",
         operator_instruction="Uprzejmie",
+        approved_by=None,
+        approved_at=None,
         created_at="2026-07-23T10:00:00+00:00",
         updated_at="2026-07-23T11:00:00+00:00",
     )
@@ -135,3 +139,73 @@ def test_case_workspace_service_includes_reply_draft_summary() -> None:
     assert workspace.reply_draft.subject == "Temat"
     assert workspace.reply_draft.status_label == "Edytowany"
     assert workspace.reply_draft.operator_instruction == "Uprzejmie"
+    assert workspace.reply_draft.approved_by is None
+    assert workspace.reply_draft.approved_at is None
+    assert workspace.reply_draft.is_approved is False
+
+
+def test_case_dashboard_service_formats_approved_reply_draft_status() -> None:
+    persisted_case = PersistedCase(
+        case=Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")),
+        reference_number=1,
+        status="open",
+        created_at="2026-07-23T10:00:00+00:00",
+    )
+    drafts = _FakeReplyDraftRepository(
+        drafts={
+            persisted_case.case.id: PersistedReplyDraft(
+                case_id=persisted_case.case.id,
+                subject="Temat",
+                body="Tresc",
+                status=ReplyDraftStatus.APPROVED,
+                model_name="qwen3:4b",
+                operator_instruction=None,
+                approved_by="Jan Kowalski",
+                approved_at="2026-07-23T10:05:00+00:00",
+                created_at="2026-07-23T10:00:00+00:00",
+                updated_at="2026-07-23T10:05:00+00:00",
+            )
+        }
+    )
+
+    summaries = CaseDashboardService(
+        repository=_FakeCaseRepository(cases=(persisted_case,)),
+        reply_draft_repository=drafts,
+    ).list_cases()
+
+    assert summaries[0].reply_draft_status_label == "Zatwierdzony"
+
+
+def test_case_workspace_service_includes_approved_reply_draft_metadata() -> None:
+    persisted_case = PersistedCase(
+        case=Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")),
+        reference_number=1,
+        status="open",
+        created_at="2026-07-23T10:00:00+00:00",
+        artifact_records=(),
+    )
+    draft = PersistedReplyDraft(
+        case_id=persisted_case.case.id,
+        subject="Temat",
+        body="Tresc",
+        status=ReplyDraftStatus.APPROVED,
+        model_name="qwen3:4b",
+        operator_instruction="Uprzejmie",
+        approved_by="Jan Kowalski",
+        approved_at="2026-07-23T10:05:00+00:00",
+        created_at="2026-07-23T10:00:00+00:00",
+        updated_at="2026-07-23T10:05:00+00:00",
+    )
+
+    workspace = CaseWorkspaceService(
+        repository=_FakeCaseRepository(cases=(persisted_case,)),
+        storage_reader=_FakeStorageReader(),
+        reply_draft_repository=_FakeReplyDraftRepository(drafts={persisted_case.case.id: draft}),
+    ).get_case_workspace("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    assert workspace is not None
+    assert workspace.reply_draft is not None
+    assert workspace.reply_draft.status_label == "Zatwierdzony"
+    assert workspace.reply_draft.approved_by == "Jan Kowalski"
+    assert workspace.reply_draft.approved_at == "2026-07-23T10:05:00+00:00"
+    assert workspace.reply_draft.is_approved is True

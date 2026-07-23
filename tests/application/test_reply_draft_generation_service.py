@@ -222,6 +222,8 @@ def test_reply_draft_generation_service_skips_existing_draft_without_force() -> 
         status=ReplyDraftStatus.GENERATED,
         model_name="qwen3:4b",
         operator_instruction=None,
+        approved_by=None,
+        approved_at=None,
         created_at="2026-07-23T10:00:00+00:00",
         updated_at="2026-07-23T10:00:00+00:00",
     )
@@ -253,6 +255,8 @@ def test_reply_draft_generation_service_force_replaces_existing_draft_and_keeps_
         status=ReplyDraftStatus.EDITED,
         model_name="old-model",
         operator_instruction="Stara instrukcja",
+        approved_by=None,
+        approved_at=None,
         created_at="2026-07-23T08:00:00+00:00",
         updated_at="2026-07-23T09:00:00+00:00",
     )
@@ -282,7 +286,53 @@ def test_reply_draft_generation_service_force_replaces_existing_draft_and_keeps_
     assert result.draft.created_at == "2026-07-23T08:00:00+00:00"
     assert result.draft.updated_at >= "2026-07-23T09:00:00+00:00"
     assert result.draft.status is ReplyDraftStatus.GENERATED
+    assert result.draft.approved_by is None
+    assert result.draft.approved_at is None
     assert repository.saved_draft is not None
+
+
+def test_reply_draft_generation_service_force_replaces_approved_draft_and_clears_approval() -> None:
+    record = _artifact_record(0, "message.txt", "artifacts/aa/message.txt")
+    existing_draft = PersistedReplyDraft(
+        case_id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        subject="Stary temat",
+        body="Stara tresc",
+        status=ReplyDraftStatus.APPROVED,
+        model_name="old-model",
+        operator_instruction="Stara instrukcja",
+        approved_by="Jan Kowalski",
+        approved_at="2026-07-23T09:30:00+00:00",
+        created_at="2026-07-23T08:00:00+00:00",
+        updated_at="2026-07-23T09:30:00+00:00",
+    )
+    repository = _FakeReplyDraftRepository(draft=existing_draft)
+    service = ReplyDraftGenerationService(
+        case_repository=_FakeCaseRepository(persisted_case=_persisted_case(record)),
+        classification_repository=_FakeClassificationRepository(),
+        reply_draft_repository=repository,
+        storage_reader=_FakeStorageReader(
+            content_by_locator={"artifacts/aa/message.txt": b"Nowy tekst"},
+            failing_locators=set(),
+        ),
+        generator=_FakeGenerator(
+            result=GeneratedReplyDraft(subject="Nowy temat", body="Nowa tresc", model_name="qwen3:4b")
+        ),
+        max_input_chars=10_000,
+        max_operator_instruction_chars=2000,
+    )
+
+    result = service.generate_reply_draft(
+        Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        force=True,
+    )
+
+    assert result is not None
+    assert result.draft is not None
+    assert result.draft.status is ReplyDraftStatus.GENERATED
+    assert result.draft.approved_by is None
+    assert result.draft.approved_at is None
+    assert result.draft.created_at == "2026-07-23T08:00:00+00:00"
+    assert result.draft.updated_at >= "2026-07-23T09:30:00+00:00"
 
 
 def test_reply_draft_generation_service_returns_none_for_missing_case() -> None:

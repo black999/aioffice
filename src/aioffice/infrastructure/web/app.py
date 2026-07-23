@@ -29,6 +29,7 @@ from aioffice.application.services import (
     DocumentExtractionService,
     DocumentImportService,
     MailImportService,
+    ReplyDraftApprovalService,
     ReplyDraftEditingService,
     ReplyDraftGenerationService,
 )
@@ -131,7 +132,7 @@ def _build_classification_message(request: Request) -> str | None:
     return None
 
 
-def _build_reply_draft_message(request: Request) -> str | None:
+def _build_reply_draft_message_legacy(request: Request) -> str | None:
     if request.query_params.get("reply_draft_success") == "1":
         return "Projekt odpowiedzi zostaĹ‚ wygenerowany."
     if request.query_params.get("reply_draft_skipped") == "1":
@@ -155,6 +156,32 @@ def _build_mail_polling_snapshot(
     if poller is None:
         return False, None, None
     return True, int(poller.interval_seconds), poller.get_status()
+
+
+def _build_reply_draft_message(request: Request) -> str | None:
+    if request.query_params.get("reply_draft_success") == "1":
+        return "Projekt odpowiedzi został wygenerowany."
+    if request.query_params.get("reply_draft_skipped") == "1":
+        return "Projekt odpowiedzi już istnieje."
+    if request.query_params.get("reply_draft_no_text") == "1":
+        return "Brak użytecznego tekstu do wygenerowania projektu odpowiedzi."
+    if request.query_params.get("reply_draft_error") == "1":
+        return "Nie udało się wygenerować projektu odpowiedzi."
+    if request.query_params.get("reply_draft_validation_error") == "1":
+        return "Nieprawidłowe dane projektu odpowiedzi."
+    if request.query_params.get("reply_draft_busy") == "1":
+        return "Generowanie projektu odpowiedzi już trwa."
+    if request.query_params.get("reply_draft_saved") == "1":
+        return "Projekt odpowiedzi został zapisany."
+    if request.query_params.get("reply_draft_approved") == "1":
+        return "Projekt odpowiedzi został zatwierdzony."
+    if request.query_params.get("reply_draft_approval_revoked") == "1":
+        return "Zatwierdzenie projektu zostało cofnięte."
+    if request.query_params.get("reply_draft_approval_validation_error") == "1":
+        return "Nieprawidłowa nazwa osoby zatwierdzającej."
+    if request.query_params.get("reply_draft_approval_error") == "1":
+        return "Nie udało się zmienić zatwierdzenia projektu."
+    return None
 
 
 def _build_content_disposition(display_name: str) -> str:
@@ -255,6 +282,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         else None
     )
     reply_draft_editing_service = ReplyDraftEditingService(repository=reply_draft_repository)
+    reply_draft_approval_service = ReplyDraftApprovalService(repository=reply_draft_repository)
     watch_folder = WatchFolder(
         watch_directory=settings.incoming_directory,
         processed_directory=settings.processed_directory,
@@ -328,6 +356,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.state.ai_classification_enabled = settings.ai_classification_enabled
     app.state.reply_draft_generation_service = reply_draft_generation_service
     app.state.reply_draft_editing_service = reply_draft_editing_service
+    app.state.reply_draft_approval_service = reply_draft_approval_service
     app.state.reply_draft_generation_lock = reply_draft_generation_lock
     app.state.ai_reply_draft_enabled = settings.ai_reply_draft_enabled
     app.state.reply_draft_max_operator_instruction_chars = (
@@ -509,6 +538,65 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         if draft is None:
             raise HTTPException(status_code=404)
         return RedirectResponse(url=f"/cases/{case_id}?reply_draft_saved=1", status_code=303)
+
+    @app.post("/cases/{case_id}/reply-draft/approve")
+    def approve_reply_draft(
+        case_id: str,
+        request: Request,
+        approved_by: str = Form(...),
+    ) -> Response:
+        reply_draft_approval_service = request.app.state.reply_draft_approval_service
+
+        try:
+            identifier = Identifier.from_string(case_id)
+        except ValueError:
+            raise HTTPException(status_code=404) from None
+
+        try:
+            draft = reply_draft_approval_service.approve_reply_draft(
+                identifier,
+                approved_by=approved_by,
+            )
+        except ValueError:
+            return RedirectResponse(
+                url=f"/cases/{case_id}?reply_draft_approval_validation_error=1",
+                status_code=303,
+            )
+        except Exception:
+            logger.exception("Reply draft approval failed: case_id=%s", case_id)
+            return RedirectResponse(
+                url=f"/cases/{case_id}?reply_draft_approval_error=1",
+                status_code=303,
+            )
+
+        if draft is None:
+            raise HTTPException(status_code=404)
+        return RedirectResponse(url=f"/cases/{case_id}?reply_draft_approved=1", status_code=303)
+
+    @app.post("/cases/{case_id}/reply-draft/revoke-approval")
+    def revoke_reply_draft_approval(case_id: str, request: Request) -> Response:
+        reply_draft_approval_service = request.app.state.reply_draft_approval_service
+
+        try:
+            identifier = Identifier.from_string(case_id)
+        except ValueError:
+            raise HTTPException(status_code=404) from None
+
+        try:
+            draft = reply_draft_approval_service.revoke_reply_draft_approval(identifier)
+        except Exception:
+            logger.exception("Reply draft approval failed: case_id=%s", case_id)
+            return RedirectResponse(
+                url=f"/cases/{case_id}?reply_draft_approval_error=1",
+                status_code=303,
+            )
+
+        if draft is None:
+            raise HTTPException(status_code=404)
+        return RedirectResponse(
+            url=f"/cases/{case_id}?reply_draft_approval_revoked=1",
+            status_code=303,
+        )
 
     @app.post("/cases/{case_id}/extract-documents")
     def extract_documents(case_id: str) -> Response:

@@ -109,7 +109,16 @@
 ## Manual AI reply drafts
 
 - Reply drafts are not sent automatically.
-- There is no approval workflow yet.
+- `approved_by` is not a verified identity.
+- There is no user authentication yet.
+- There is no approval history.
+- There is no digital signature.
+- There is no two-person approval.
+- There are no roles.
+- There is no audit trail for draft changes.
+- There is no protection against concurrent edits.
+- Approval does not mean the message was sent.
+- Another process can still overwrite approval because there is no optimistic locking.
 - There is no version history for drafts.
 - There are no signatures or company templates yet.
 - There is no recipient model yet.

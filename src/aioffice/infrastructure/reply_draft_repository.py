@@ -46,16 +46,20 @@ class SQLiteReplyDraftRepository(ReplyDraftRepository):
                     status,
                     model_name,
                     operator_instruction,
+                    approved_by,
+                    approved_at,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(case_id) DO UPDATE SET
                     subject = excluded.subject,
                     body = excluded.body,
                     status = excluded.status,
                     model_name = excluded.model_name,
                     operator_instruction = excluded.operator_instruction,
+                    approved_by = excluded.approved_by,
+                    approved_at = excluded.approved_at,
                     created_at = excluded.created_at,
                     updated_at = excluded.updated_at
                 """,
@@ -66,6 +70,8 @@ class SQLiteReplyDraftRepository(ReplyDraftRepository):
                     draft.status.value,
                     draft.model_name,
                     draft.operator_instruction,
+                    draft.approved_by,
+                    draft.approved_at,
                     draft.created_at,
                     draft.updated_at,
                 ),
@@ -85,6 +91,8 @@ class SQLiteReplyDraftRepository(ReplyDraftRepository):
                     status,
                     model_name,
                     operator_instruction,
+                    approved_by,
+                    approved_at,
                     created_at,
                     updated_at
                 FROM reply_drafts
@@ -142,13 +150,28 @@ class SQLiteReplyDraftRepository(ReplyDraftRepository):
                     status TEXT NOT NULL,
                     model_name TEXT NOT NULL,
                     operator_instruction TEXT,
+                    approved_by TEXT,
+                    approved_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY (case_id) REFERENCES cases(id)
                 )
                 """
             )
+            self._ensure_column("approved_by", "TEXT")
+            self._ensure_column("approved_at", "TEXT")
             self._connection.commit()
+
+    def _ensure_column(self, column_name: str, column_definition: str) -> None:
+        columns = {
+            str(row["name"])
+            for row in self._connection.execute("PRAGMA table_info(reply_drafts)").fetchall()
+        }
+        if column_name in columns:
+            return
+        self._connection.execute(
+            f"ALTER TABLE reply_drafts ADD COLUMN {column_name} {column_definition}"
+        )
 
     def _build_persisted_draft(self, row: sqlite3.Row) -> PersistedReplyDraft:
         try:
@@ -167,6 +190,8 @@ class SQLiteReplyDraftRepository(ReplyDraftRepository):
                 operator_instruction=(
                     None if row["operator_instruction"] is None else str(row["operator_instruction"])
                 ),
+                approved_by=None if row["approved_by"] is None else str(row["approved_by"]),
+                approved_at=None if row["approved_at"] is None else str(row["approved_at"]),
                 created_at=str(row["created_at"]),
                 updated_at=str(row["updated_at"]),
             )

@@ -13,6 +13,7 @@ from aioffice.application import (
     ReplyDraftGenerationResult,
     ReplyDraftGenerator,
     ReplyDraftRepository,
+    ReplyDraftStatus,
     build_persisted_reply_draft,
     normalize_operator_instruction,
 )
@@ -80,6 +81,7 @@ class ReplyDraftGenerationService:
             generated_draft=generated_draft,
             operator_instruction=normalized_instruction,
             existing_draft=existing_draft,
+            status=ReplyDraftStatus.GENERATED,
         )
         self.reply_draft_repository.save(persisted_draft)
         return ReplyDraftGenerationResult(
