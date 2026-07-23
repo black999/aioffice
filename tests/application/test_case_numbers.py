@@ -8,8 +8,10 @@ import pytest
 
 from aioffice.application import (
     ArtifactLocatorConflictError,
+    ArtifactRecord,
     CaseFactory,
     CaseRepository,
+    DownloadableArtifact,
     PersistedCase,
     format_case_reference,
 )
@@ -36,7 +38,12 @@ class _RaceConditionRepository(CaseRepository):
     save_calls: int = 0
     get_calls: int = 0
 
-    def save(self, case: Case, reference_number: int) -> None:
+    def save(
+        self,
+        case: Case,
+        reference_number: int,
+        artifact_records: tuple[ArtifactRecord, ...] | None = None,
+    ) -> None:
         self.save_calls += 1
         raise ArtifactLocatorConflictError("artifact locator is already assigned to another case")
 
@@ -57,13 +64,21 @@ class _RaceConditionRepository(CaseRepository):
     def count(self) -> int:
         return 1
 
+    def get_artifact(self, case_id: Identifier, position: int) -> DownloadableArtifact | None:
+        return None
+
 
 @dataclass(slots=True)
 class _IntegrityErrorRepository(CaseRepository):
     error_message: str
     save_calls: int = 0
 
-    def save(self, case: Case, reference_number: int) -> None:
+    def save(
+        self,
+        case: Case,
+        reference_number: int,
+        artifact_records: tuple[ArtifactRecord, ...] | None = None,
+    ) -> None:
         self.save_calls += 1
         raise sqlite3.IntegrityError(self.error_message)
 
@@ -78,6 +93,9 @@ class _IntegrityErrorRepository(CaseRepository):
 
     def count(self) -> int:
         return 0
+
+    def get_artifact(self, case_id: Identifier, position: int) -> DownloadableArtifact | None:
+        return None
 
 
 def _service(tmp_path: Path) -> tuple[DocumentImportService, SQLiteCaseRepository, SQLiteCaseNumberProvider]:

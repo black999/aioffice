@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from aioffice.application import ArtifactRecord, sanitize_display_name
 from aioffice.application.case_numbers import CaseNumberProvider
 from aioffice.application.cases import CaseFactory
 from aioffice.application.repositories import ArtifactLocatorConflictError, CaseRepository
@@ -32,8 +33,15 @@ class DocumentImportService:
         artifact = Artifact(artifact_type=ArtifactType.PDF, storage_reference=storage_reference)
         reference_number = self.case_number_provider.next_number()
         case = self.case_factory.create_from_artifact(artifact)
+        artifact_records = (
+            ArtifactRecord(
+                artifact=artifact,
+                display_name=sanitize_display_name(source_path.name, fallback="document.pdf"),
+                content_type="application/pdf",
+            ),
+        )
         try:
-            self.case_repository.save(case, reference_number)
+            self.case_repository.save(case, reference_number, artifact_records=artifact_records)
         except ArtifactLocatorConflictError:
             existing_case = self.case_repository.get_by_artifact_locator(storage_reference.locator)
             if existing_case is None:

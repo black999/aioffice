@@ -65,4 +65,16 @@
 - Imported messages are not moved to another folder after import.
 - The IMAP password is currently passed through an environment variable.
 
+## Artifact downloads
+
+- Case Workspace now shows extracted email body text and artifact download links.
+- Download endpoints currently have no authentication or per-case authorization.
+- Any user with access to the application can download stored artifacts.
+- Physical storage paths are not exposed through the HTTP API.
+- Range requests are not supported yet.
+- Browser preview for PDF or other artifacts is not implemented yet.
+- Antivirus scanning is not implemented yet.
+- OCR is not implemented yet.
+- Retention rules and garbage collection for unreferenced artifacts are not implemented yet.
+
 No architectural change proposed.

@@ -10,7 +10,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from aioffice.application import MailImportResult
+from aioffice.application import ArtifactRecord, MailImportResult
 from aioffice.domain import Artifact, ArtifactType, Case, Identifier, StorageReference
 from aioffice.infrastructure import (
     AppSettings,
@@ -87,22 +87,38 @@ def _save_case(
     *,
     case_id: str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
     reference_number: int = 1,
-    with_artifact: bool = False,
+    artifact_records: tuple[ArtifactRecord, ...] | None = None,
 ) -> None:
     repository = SQLiteCaseRepository(database_path=database_path)
     case = Case(id=Identifier.from_string(case_id))
-    if with_artifact:
-        case.add_artifact(
-            Artifact(
-                artifact_type=ArtifactType.PDF,
-                storage_reference=StorageReference(
-                    storage_name="filesystem",
-                    locator="artifacts/aa/bb/document.pdf",
-                ),
-            )
-        )
-    repository.save(case, reference_number=reference_number)
+    if artifact_records is not None:
+        for record in artifact_records:
+            case.add_artifact(record.artifact)
+    repository.save(case, reference_number=reference_number, artifact_records=artifact_records)
     repository.close()
+
+
+def _artifact_record(
+    *,
+    artifact_type: ArtifactType,
+    locator: str,
+    display_name: str,
+    content_type: str | None,
+) -> ArtifactRecord:
+    return ArtifactRecord(
+        artifact=Artifact(
+            artifact_type=artifact_type,
+            storage_reference=StorageReference(storage_name="filesystem", locator=locator),
+        ),
+        display_name=display_name,
+        content_type=content_type,
+    )
+
+
+def _write_artifact(root_directory: Path, locator: str, content: bytes) -> None:
+    artifact_path = root_directory / Path(locator)
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_bytes(content)
 
 
 def test_get_root_returns_http_200_and_displays_cases(tmp_path: Path) -> None:
@@ -272,7 +288,7 @@ def test_get_case_workspace_returns_http_200_and_displays_case_workspace(tmp_pat
 
     assert response.status_code == 200
     assert "CASE-000001" in response.text
-    assert "<h1>CASE-000001</h1>" in response.text
+    assert "<h1>Sprawa CASE-000001</h1>" in response.text
     assert "open" in response.text
     assert "Created" in response.text
     assert "Imported" in response.text
@@ -282,49 +298,49 @@ def test_get_case_workspace_returns_http_200_and_displays_case_workspace(tmp_pat
 
 def test_get_case_workspace_displays_artifact(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
-    _save_case(settings.database_path, with_artifact=True)
+    record = _artifact_record(
+        artifact_type=ArtifactType.PDF,
+        locator="artifacts/aa/bb/document.pdf",
+        display_name="document.pdf",
+        content_type="application/pdf",
+    )
+    _write_artifact(settings.data_directory, record.artifact.storage_reference.locator, b"%PDF")
+    _save_case(settings.database_path, artifact_records=(record,))
 
     with TestClient(create_app(settings)) as client:
         response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 
     assert response.status_code == 200
     assert "PDF" in response.text
-    assert "artifacts/aa/bb/document.pdf" in response.text
+    assert "document.pdf" in response.text
+    assert 'href="/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/artifacts/0/download"' in response.text
+    assert "artifacts/aa/bb/document.pdf" not in response.text
 
 
 def test_get_case_workspace_displays_all_mail_artifacts_in_order(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
-    repository = SQLiteCaseRepository(database_path=settings.database_path)
-    case = Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
-    case.add_artifact(
-        Artifact(
+    records = (
+        _artifact_record(
             artifact_type=ArtifactType.EMAIL,
-            storage_reference=StorageReference(
-                storage_name="filesystem",
-                locator="artifacts/aa/bb/message.eml",
-            ),
-        )
-    )
-    case.add_artifact(
-        Artifact(
+            locator="artifacts/aa/bb/message.eml",
+            display_name="message.eml",
+            content_type="message/rfc822",
+        ),
+        _artifact_record(
             artifact_type=ArtifactType.TEXT,
-            storage_reference=StorageReference(
-                storage_name="filesystem",
-                locator="artifacts/aa/bb/message.txt",
-            ),
-        )
-    )
-    case.add_artifact(
-        Artifact(
+            locator="artifacts/aa/bb/message.txt",
+            display_name="message.txt",
+            content_type="text/plain; charset=utf-8",
+        ),
+        _artifact_record(
             artifact_type=ArtifactType.ATTACHMENT,
-            storage_reference=StorageReference(
-                storage_name="filesystem",
-                locator="artifacts/aa/bb/attachment.pdf",
-            ),
-        )
+            locator="artifacts/aa/bb/attachment.pdf",
+            display_name="invoice.pdf",
+            content_type="application/pdf",
+        ),
     )
-    repository.save(case, reference_number=1)
-    repository.close()
+    _write_artifact(settings.data_directory, "artifacts/aa/bb/message.txt", b"Hello body")
+    _save_case(settings.database_path, artifact_records=records)
 
     with TestClient(create_app(settings)) as client:
         response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
@@ -334,9 +350,10 @@ def test_get_case_workspace_displays_all_mail_artifacts_in_order(tmp_path: Path)
     text_position = response.text.index("TEXT")
     attachment_position = response.text.index("ATTACHMENT")
     assert email_position < text_position < attachment_position
-    assert "artifacts/aa/bb/message.eml" in response.text
-    assert "artifacts/aa/bb/message.txt" in response.text
-    assert "artifacts/aa/bb/attachment.pdf" in response.text
+    assert "message.eml" in response.text
+    assert "message.txt" in response.text
+    assert "invoice.pdf" in response.text
+    assert "Hello body" in response.text
 
 
 def test_get_case_workspace_returns_404_for_missing_case(tmp_path: Path) -> None:
@@ -355,6 +372,193 @@ def test_get_case_workspace_returns_404_for_invalid_identifier(tmp_path: Path) -
         response = client.get("/cases/not-a-uuid")
 
     assert response.status_code == 404
+
+
+def test_case_workspace_escapes_email_html_and_preserves_line_breaks(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    text_record = _artifact_record(
+        artifact_type=ArtifactType.TEXT,
+        locator="artifacts/aa/bb/message.txt",
+        display_name="message.txt",
+        content_type="text/plain; charset=utf-8",
+    )
+    _write_artifact(
+        settings.data_directory,
+        text_record.artifact.storage_reference.locator,
+        b'<script>alert("x")</script>\nSecond line',
+    )
+    _save_case(settings.database_path, artifact_records=(text_record,))
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    assert response.status_code == 200
+    assert "Treść wiadomości" in response.text
+    assert "&lt;script&gt;alert" in response.text
+    assert "<script>alert(" not in response.text
+    assert "Second line" in response.text
+
+
+def test_case_workspace_hides_email_section_when_text_artifact_is_missing(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    record = _artifact_record(
+        artifact_type=ArtifactType.PDF,
+        locator="artifacts/aa/bb/document.pdf",
+        display_name="document.pdf",
+        content_type="application/pdf",
+    )
+    _write_artifact(settings.data_directory, record.artifact.storage_reference.locator, b"%PDF")
+    _save_case(settings.database_path, artifact_records=(record,))
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    assert response.status_code == 200
+    assert "Treść wiadomości" not in response.text
+
+
+def test_case_workspace_shows_neutral_message_for_large_email_body(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    text_record = _artifact_record(
+        artifact_type=ArtifactType.TEXT,
+        locator="artifacts/aa/bb/message.txt",
+        display_name="message.txt",
+        content_type="text/plain; charset=utf-8",
+    )
+    _write_artifact(
+        settings.data_directory,
+        text_record.artifact.storage_reference.locator,
+        b"x" * (1024 * 1024 + 1),
+    )
+    _save_case(settings.database_path, artifact_records=(text_record,))
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    assert response.status_code == 200
+    assert "Treść wiadomości jest zbyt duża do wyświetlenia." in response.text
+
+
+def test_download_artifact_returns_txt_file_with_safe_headers(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    text_record = _artifact_record(
+        artifact_type=ArtifactType.TEXT,
+        locator="artifacts/aa/bb/message.txt",
+        display_name="faktura lipiec.pdf",
+        content_type="text/plain; charset=utf-8",
+    )
+    _write_artifact(settings.data_directory, text_record.artifact.storage_reference.locator, b"hello")
+    _save_case(settings.database_path, artifact_records=(text_record,))
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/artifacts/0/download")
+
+    assert response.status_code == 200
+    assert response.content == b"hello"
+    assert response.headers["content-type"].startswith("text/plain; charset=utf-8")
+    assert "attachment;" in response.headers["content-disposition"]
+    assert 'filename="faktura lipiec.pdf"' in response.headers["content-disposition"]
+
+
+@pytest.mark.parametrize(
+    ("display_name", "expected_ascii_fragment"),
+    (
+        ("faktura.pdf", 'filename="faktura.pdf"'),
+        ("faktura lipiec.pdf", 'filename="faktura lipiec.pdf"'),
+        ("zażółć-gęślą.pdf", 'filename="za____-g__l_.pdf"'),
+        ('evil"file.pdf', 'filename="evil_file.pdf"'),
+        ("../secret.txt", 'filename="__secret.txt"'),
+    ),
+)
+def test_download_artifact_builds_safe_content_disposition(
+    tmp_path: Path,
+    display_name: str,
+    expected_ascii_fragment: str,
+) -> None:
+    settings = _settings(tmp_path)
+    record = _artifact_record(
+        artifact_type=ArtifactType.ATTACHMENT,
+        locator="artifacts/aa/bb/blob.bin",
+        display_name=display_name,
+        content_type="application/octet-stream",
+    )
+    _write_artifact(settings.data_directory, record.artifact.storage_reference.locator, b"blob")
+    _save_case(settings.database_path, artifact_records=(record,))
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/artifacts/0/download")
+
+    assert response.status_code == 200
+    assert expected_ascii_fragment in response.headers["content-disposition"]
+    assert "\r" not in response.headers["content-disposition"]
+    assert "\n" not in response.headers["content-disposition"]
+
+
+def test_download_artifact_returns_404_for_missing_case(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/artifacts/0/download")
+
+    assert response.status_code == 404
+
+
+def test_download_artifact_returns_404_for_invalid_identifier(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/not-a-uuid/artifacts/0/download")
+
+    assert response.status_code == 404
+
+
+def test_download_artifact_returns_404_for_negative_position(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/artifacts/-1/download")
+
+    assert response.status_code == 404
+
+
+def test_download_artifact_returns_404_for_missing_physical_file_without_leaking_path(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    settings = _settings(tmp_path)
+    record = _artifact_record(
+        artifact_type=ArtifactType.PDF,
+        locator="artifacts/aa/bb/missing.pdf",
+        display_name="missing.pdf",
+        content_type="application/pdf",
+    )
+    _save_case(settings.database_path, artifact_records=(record,))
+
+    with TestClient(create_app(settings)) as client, caplog.at_level("WARNING"):
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/artifacts/0/download")
+
+    assert response.status_code == 404
+    assert str(settings.data_directory) not in response.text
+    assert "Artifact file is missing" in caplog.text
+    assert str(settings.data_directory) not in caplog.text
+
+
+def test_download_artifact_returns_404_for_path_traversal_locator(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    traversal_record = _artifact_record(
+        artifact_type=ArtifactType.ATTACHMENT,
+        locator="../secret.txt",
+        display_name="secret.txt",
+        content_type="text/plain",
+    )
+    _save_case(settings.database_path, artifact_records=(traversal_record,))
+    secret_path = tmp_path / "secret.txt"
+    secret_path.write_text("secret")
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/artifacts/0/download")
+
+    assert response.status_code == 404
+    assert response.text != "secret"
 
 
 def test_create_app_uses_passed_database_path(tmp_path: Path) -> None:

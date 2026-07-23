@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from .artifact_metadata import ArtifactRecord, DownloadableArtifact
 from aioffice.domain import Case, Identifier
 
 
@@ -20,12 +21,18 @@ class PersistedCase:
     reference_number: int
     status: str
     created_at: str
+    artifact_records: tuple[ArtifactRecord, ...] = ()
 
 
 class CaseRepository(Protocol):
     """Persistence contract for cases."""
 
-    def save(self, case: Case, reference_number: int) -> None:
+    def save(
+        self,
+        case: Case,
+        reference_number: int,
+        artifact_records: tuple[ArtifactRecord, ...] | None = None,
+    ) -> None:
         """Persist a case."""
 
     def get(self, case_id: Identifier) -> PersistedCase | None:
@@ -39,3 +46,6 @@ class CaseRepository(Protocol):
 
     def count(self) -> int:
         """Count all persisted cases."""
+
+    def get_artifact(self, case_id: Identifier, position: int) -> DownloadableArtifact | None:
+        """Load a persisted artifact by case and position."""

@@ -6,8 +6,10 @@ from pathlib import Path
 
 from aioffice.application import (
     ArtifactLocatorConflictError,
+    ArtifactRecord,
     CaseFactory,
     CaseRepository,
+    DownloadableArtifact,
     ImportedMailConflictError,
     ImportedMailRepository,
     MailContentParser,
@@ -70,7 +72,12 @@ class _ConflictCaseRepository(CaseRepository):
     persisted_case: PersistedCase
     get_calls: int = 0
 
-    def save(self, case: Case, reference_number: int) -> None:
+    def save(
+        self,
+        case: Case,
+        reference_number: int,
+        artifact_records: tuple[ArtifactRecord, ...] | None = None,
+    ) -> None:
         raise ArtifactLocatorConflictError("artifact locator is already assigned to another case")
 
     def get(self, case_id: Identifier) -> PersistedCase | None:
@@ -89,6 +96,9 @@ class _ConflictCaseRepository(CaseRepository):
 
     def count(self) -> int:
         return 1
+
+    def get_artifact(self, case_id: Identifier, position: int) -> DownloadableArtifact | None:
+        return None
 
 
 @dataclass(slots=True)

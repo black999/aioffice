@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="pl">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,7 +9,7 @@
 <body>
     <main class="container">
         <p><a href="/">Back to cases</a></p>
-        <h1>{{ workspace.case_reference }}</h1>
+        <h1>Sprawa {{ workspace.case_reference }}</h1>
 
         <section>
             <h2>Status</h2>
@@ -21,12 +21,33 @@
             <p>{{ workspace.created_at }}</p>
         </section>
 
+        {% if workspace.email_body is not none or workspace.email_body_truncated or workspace.email_body_error %}
         <section>
-            <h2>Artifacts</h2>
+            <h2>Treść wiadomości</h2>
+            {% if workspace.email_body_error %}
+            <p>Nie udało się odczytać treści wiadomości.</p>
+            {% elif workspace.email_body_truncated %}
+            <p>Treść wiadomości jest zbyt duża do wyświetlenia.</p>
+            {% elif workspace.email_body %}
+            <pre>{{ workspace.email_body }}</pre>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        <section>
+            <h2>Artefakty</h2>
             {% if workspace.artifacts %}
             <ul>
                 {% for artifact in workspace.artifacts %}
-                <li>{{ artifact.artifact_type }} — {{ artifact.locator }}</li>
+                <li>
+                    {{ artifact.position }}.
+                    {{ artifact.artifact_type }}
+                    - {{ artifact.display_name }}
+                    {% if artifact.content_type %}
+                    ({{ artifact.content_type }})
+                    {% endif %}
+                    <a href="{{ artifact.download_url }}">Pobierz</a>
+                </li>
                 {% endfor %}
             </ul>
             {% else %}
@@ -38,7 +59,7 @@
             <h2>History</h2>
             <ul>
                 {% for entry in workspace.history %}
-                <li>{{ entry.title }} — {{ entry.timestamp }}</li>
+                <li>{{ entry.title }} - {{ entry.timestamp }}</li>
                 {% endfor %}
             </ul>
         </section>

@@ -10,8 +10,10 @@ from threading import RLock
 
 from aioffice.application import (
     ArtifactLocatorConflictError,
+    ArtifactRecord,
     CaseNumberProvider,
     CaseRepository,
+    DownloadableArtifact,
     PersistedCase,
 )
 from aioffice.domain import Artifact, ArtifactType, Case, Identifier, StorageReference
@@ -40,7 +42,12 @@ class SQLiteCaseRepository(CaseRepository):
         with self._lock:
             self._connection.close()
 
-    def save(self, case: Case, reference_number: int) -> None:
+    def save(
+        self,
+        case: Case,
+        reference_number: int,
+        artifact_records: tuple[ArtifactRecord, ...] | None = None,
+    ) -> None:
         """Persist a case with its assigned business reference number."""
 
         with self._lock:
@@ -54,8 +61,16 @@ class SQLiteCaseRepository(CaseRepository):
                     if existing_row is not None
                     else datetime.now(UTC).isoformat(timespec="seconds")
                 )
-                if case.artifacts:
-                    primary_artifact = case.artifacts[0]
+                records_to_persist = artifact_records or tuple(
+                    ArtifactRecord(
+                        artifact=artifact,
+                        display_name=self._default_display_name(artifact.artifact_type),
+                        content_type=self._default_content_type(artifact.artifact_type),
+                    )
+                    for artifact in case.artifacts
+                )
+                if records_to_persist:
+                    primary_artifact = records_to_persist[0].artifact
                     artifact_locator = primary_artifact.storage_reference.locator
                     artifact_type = primary_artifact.artifact_type.value
                 else:
@@ -93,11 +108,13 @@ class SQLiteCaseRepository(CaseRepository):
                     (
                         str(case.id),
                         position,
-                        artifact.artifact_type.value,
-                        artifact.storage_reference.storage_name,
-                        artifact.storage_reference.locator,
+                        record.artifact.artifact_type.value,
+                        record.artifact.storage_reference.storage_name,
+                        record.artifact.storage_reference.locator,
+                        record.display_name,
+                        record.content_type,
                     )
-                    for position, artifact in enumerate(case.artifacts)
+                    for position, record in enumerate(records_to_persist)
                 ]
                 if artifact_rows:
                     self._connection.executemany(
@@ -107,9 +124,11 @@ class SQLiteCaseRepository(CaseRepository):
                             position,
                             artifact_type,
                             storage_name,
-                            locator
+                            locator,
+                            display_name,
+                            content_type
                         )
-                        VALUES (?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
                         artifact_rows,
                     )
@@ -209,12 +228,27 @@ class SQLiteCaseRepository(CaseRepository):
                 return 0
             return int(row["total"])
 
+    def get_artifact(self, case_id: Identifier, position: int) -> DownloadableArtifact | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT case_id, position, artifact_type, storage_name, locator, display_name, content_type
+                FROM case_artifacts
+                WHERE case_id = ? AND position = ?
+                """,
+                (str(case_id), position),
+            ).fetchone()
+            if row is None:
+                return None
+            return self._build_downloadable_artifact(row)
+
     def _build_persisted_case(
         self,
         row: sqlite3.Row,
         artifact_rows: tuple[sqlite3.Row, ...],
     ) -> PersistedCase:
         case = Case(id=Identifier.from_string(row["id"]))
+        records: list[ArtifactRecord] = []
         for artifact_row in artifact_rows:
             artifact_type = ArtifactType(str(artifact_row["artifact_type"]))
             artifact = Artifact(
@@ -225,12 +259,24 @@ class SQLiteCaseRepository(CaseRepository):
                 ),
             )
             case.add_artifact(artifact)
+            records.append(
+                ArtifactRecord(
+                    artifact=artifact,
+                    display_name=str(artifact_row["display_name"]),
+                    content_type=(
+                        str(artifact_row["content_type"])
+                        if artifact_row["content_type"] is not None
+                        else None
+                    ),
+                )
+            )
         case.pull_events()
         return PersistedCase(
             case=case,
             reference_number=int(row["reference_number"]),
             status=str(row["status"]),
             created_at=str(row["created_at"]),
+            artifact_records=tuple(records),
         )
 
     def _is_artifact_locator_conflict(self, error: sqlite3.IntegrityError) -> bool:
@@ -263,6 +309,8 @@ class SQLiteCaseRepository(CaseRepository):
                     artifact_type TEXT NOT NULL,
                     storage_name TEXT NOT NULL,
                     locator TEXT NOT NULL,
+                    display_name TEXT,
+                    content_type TEXT,
                     PRIMARY KEY (case_id, position),
                     FOREIGN KEY (case_id) REFERENCES cases(id)
                 )
@@ -296,6 +344,14 @@ class SQLiteCaseRepository(CaseRepository):
                     """,
                     (ArtifactType.PDF.value,),
                 )
+            artifact_columns = {
+                row["name"]
+                for row in self._connection.execute("PRAGMA table_info(case_artifacts)").fetchall()
+            }
+            if "display_name" not in artifact_columns:
+                self._connection.execute("ALTER TABLE case_artifacts ADD COLUMN display_name TEXT")
+            if "content_type" not in artifact_columns:
+                self._connection.execute("ALTER TABLE case_artifacts ADD COLUMN content_type TEXT")
             self._connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS ix_cases_primary_artifact_locator
@@ -315,14 +371,30 @@ class SQLiteCaseRepository(CaseRepository):
                     position,
                     artifact_type,
                     storage_name,
-                    locator
+                    locator,
+                    display_name,
+                    content_type
                 )
                 SELECT
                     cases.id,
                     0,
                     COALESCE(cases.primary_artifact_type, ?),
                     'filesystem',
-                    cases.primary_artifact_locator
+                    cases.primary_artifact_locator,
+                    CASE COALESCE(cases.primary_artifact_type, ?)
+                        WHEN 'pdf' THEN 'document.pdf'
+                        WHEN 'email' THEN 'message.eml'
+                        WHEN 'text' THEN 'message.txt'
+                        WHEN 'attachment' THEN 'attachment.bin'
+                        ELSE 'artifact.bin'
+                    END,
+                    CASE COALESCE(cases.primary_artifact_type, ?)
+                        WHEN 'pdf' THEN 'application/pdf'
+                        WHEN 'email' THEN 'message/rfc822'
+                        WHEN 'text' THEN 'text/plain; charset=utf-8'
+                        WHEN 'attachment' THEN 'application/octet-stream'
+                        ELSE 'application/octet-stream'
+                    END
                 FROM cases
                 WHERE cases.primary_artifact_locator IS NOT NULL
                   AND NOT EXISTS (
@@ -332,7 +404,33 @@ class SQLiteCaseRepository(CaseRepository):
                       AND case_artifacts.position = 0
                   )
                 """,
-                (ArtifactType.PDF.value,),
+                (ArtifactType.PDF.value, ArtifactType.PDF.value, ArtifactType.PDF.value),
+            )
+            self._connection.execute(
+                """
+                UPDATE case_artifacts
+                SET display_name = CASE artifact_type
+                    WHEN 'pdf' THEN 'document.pdf'
+                    WHEN 'email' THEN 'message.eml'
+                    WHEN 'text' THEN 'message.txt'
+                    WHEN 'attachment' THEN 'attachment.bin'
+                    ELSE 'artifact.bin'
+                END
+                WHERE display_name IS NULL
+                """
+            )
+            self._connection.execute(
+                """
+                UPDATE case_artifacts
+                SET content_type = CASE artifact_type
+                    WHEN 'pdf' THEN 'application/pdf'
+                    WHEN 'email' THEN 'message/rfc822'
+                    WHEN 'text' THEN 'text/plain; charset=utf-8'
+                    WHEN 'attachment' THEN 'application/octet-stream'
+                    ELSE 'application/octet-stream'
+                END
+                WHERE content_type IS NULL
+                """
             )
             duplicate_locator_row = self._connection.execute(
                 """
@@ -373,7 +471,7 @@ class SQLiteCaseRepository(CaseRepository):
         placeholders = ", ".join("?" for _ in case_ids)
         rows = self._connection.execute(
             f"""
-            SELECT case_id, position, artifact_type, storage_name, locator
+            SELECT case_id, position, artifact_type, storage_name, locator, display_name, content_type
             FROM case_artifacts
             WHERE case_id IN ({placeholders})
             ORDER BY case_id ASC, position ASC
@@ -381,6 +479,35 @@ class SQLiteCaseRepository(CaseRepository):
             case_ids,
         ).fetchall()
         return tuple(rows)
+
+    def _build_downloadable_artifact(self, row: sqlite3.Row) -> DownloadableArtifact:
+        return DownloadableArtifact(
+            case_id=Identifier.from_string(str(row["case_id"])),
+            position=int(row["position"]),
+            artifact_type=ArtifactType(str(row["artifact_type"])),
+            storage_reference=StorageReference(
+                storage_name=str(row["storage_name"]),
+                locator=str(row["locator"]),
+            ),
+            display_name=str(row["display_name"]),
+            content_type=str(row["content_type"]) if row["content_type"] is not None else None,
+        )
+
+    def _default_display_name(self, artifact_type: ArtifactType) -> str:
+        return {
+            ArtifactType.PDF: "document.pdf",
+            ArtifactType.EMAIL: "message.eml",
+            ArtifactType.TEXT: "message.txt",
+            ArtifactType.ATTACHMENT: "attachment.bin",
+        }[artifact_type]
+
+    def _default_content_type(self, artifact_type: ArtifactType) -> str:
+        return {
+            ArtifactType.PDF: "application/pdf",
+            ArtifactType.EMAIL: "message/rfc822",
+            ArtifactType.TEXT: "text/plain; charset=utf-8",
+            ArtifactType.ATTACHMENT: "application/octet-stream",
+        }[artifact_type]
 
 
 @dataclass(slots=True)

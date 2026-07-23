@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from aioffice.domain import StorageReference
+from aioffice.application.storage import ArtifactNotFoundError, UnsupportedStorageError
 from aioffice.infrastructure import AppSettings
 from aioffice.infrastructure.storage import FilesystemStorage
 
@@ -133,3 +134,68 @@ def test_storage_works_with_settings_data_directory(
 
     assert (settings.data_directory / Path(reference.locator)).exists()
     assert settings.artifacts_directory == settings.data_directory / "artifacts"
+
+
+def test_open_artifact_reads_existing_file(tmp_path: Path) -> None:
+    source_path = tmp_path / "offer.pdf"
+    source_path.write_bytes(b"contract-data")
+    storage = FilesystemStorage(root_directory=tmp_path)
+    reference = storage.store_file(source_path)
+
+    with storage.open_artifact(reference) as handle:
+        content = handle.read()
+
+    assert content == b"contract-data"
+
+
+def test_open_artifact_raises_controlled_error_for_missing_file(tmp_path: Path) -> None:
+    storage = FilesystemStorage(root_directory=tmp_path)
+
+    with pytest.raises(ArtifactNotFoundError, match="artifact file does not exist"):
+        storage.open_artifact(
+            StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/missing.pdf")
+        )
+
+
+def test_open_artifact_rejects_unsupported_storage_provider(tmp_path: Path) -> None:
+    storage = FilesystemStorage(root_directory=tmp_path)
+
+    with pytest.raises(UnsupportedStorageError, match="storage provider is not supported"):
+        storage.open_artifact(StorageReference(storage_name="memory", locator="artifact.pdf"))
+
+
+def test_open_artifact_rejects_parent_directory_locator(tmp_path: Path) -> None:
+    storage = FilesystemStorage(root_directory=tmp_path)
+
+    with pytest.raises(ArtifactNotFoundError, match="artifact locator is invalid"):
+        storage.open_artifact(StorageReference(storage_name="filesystem", locator="../secret.txt"))
+
+
+def test_open_artifact_rejects_absolute_locator(tmp_path: Path) -> None:
+    storage = FilesystemStorage(root_directory=tmp_path)
+    absolute_locator = str((tmp_path / "secret.txt").resolve())
+
+    with pytest.raises(ArtifactNotFoundError, match="artifact locator is invalid"):
+        storage.open_artifact(StorageReference(storage_name="filesystem", locator=absolute_locator))
+
+
+def test_open_artifact_rejects_symlink_escape_without_leaking_root_path(tmp_path: Path) -> None:
+    if not hasattr(Path, "symlink_to"):
+        pytest.skip("symlink support is not available")
+
+    storage = FilesystemStorage(root_directory=tmp_path)
+    outside_file = tmp_path.parent / "outside-secret.txt"
+    outside_file.write_text("secret")
+    escaped_link = tmp_path / "artifacts" / "aa" / "bb" / "escaped.txt"
+    escaped_link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        escaped_link.symlink_to(outside_file)
+    except OSError:
+        pytest.skip("symlinks are not available in this environment")
+
+    with pytest.raises(ArtifactNotFoundError) as error:
+        storage.open_artifact(
+            StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/escaped.txt")
+        )
+
+    assert str(tmp_path) not in str(error.value)

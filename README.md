@@ -126,3 +126,25 @@ Attachment safety limits:
 - attachment count must stay between `1` and `200`.
 
 Attachments are not yet analyzed by AI or OCR.
+
+## Case Workspace
+
+The Case Workspace now shows:
+
+- the business case reference,
+- the extracted plain-text email body when a `TEXT` artifact exists,
+- the ordered list of stored artifacts with safe display names,
+- a download link for each artifact.
+
+Artifact downloads use the case UUID and artifact position:
+
+- `GET /cases/{case_id}/artifacts/{position}/download`
+
+The storage locator is not exposed as a request parameter.
+Email HTML is displayed as escaped plain text.
+
+Still out of scope:
+
+- PDF preview,
+- inline attachment rendering,
+- OCR.

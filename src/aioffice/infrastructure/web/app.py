@@ -4,21 +4,25 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from collections.abc import Iterator
 from pathlib import Path
 from threading import Lock
 from typing import AsyncIterator
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from aioffice.application import CaseFactory, MailImportResult
+from aioffice.application import CaseFactory, MailImportResult, sanitize_display_name
 from aioffice.application.services import (
+    ArtifactDownloadService,
     CaseDashboardService,
     CaseWorkspaceService,
     DocumentImportService,
     MailImportService,
 )
+from aioffice.application.storage import ArtifactNotFoundError, UnsupportedStorageError
 from aioffice.infrastructure import (
     AppSettings,
     FilesystemStorage,
@@ -87,6 +91,19 @@ def _build_mail_polling_snapshot(
     return True, int(poller.interval_seconds), poller.get_status()
 
 
+def _build_content_disposition(display_name: str) -> str:
+    safe_display_name = sanitize_display_name(display_name, fallback="download.bin")
+    ascii_name = "".join(
+        character
+        if character.isascii() and character.isprintable() and character not in {'"', "\\", ";", "/", ":"}
+        else "_"
+        for character in safe_display_name
+    ).strip(" .")
+    if not ascii_name:
+        ascii_name = "download.bin"
+    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(safe_display_name)}'
+
+
 def create_app(settings: AppSettings | None = None) -> FastAPI:
     """Create the FastAPI application."""
 
@@ -95,11 +112,12 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
 
     repository = SQLiteCaseRepository(database_path=settings.database_path)
     dashboard_service = CaseDashboardService(repository=repository)
-    workspace_service = CaseWorkspaceService(repository=repository)
 
     import_repository = SQLiteCaseRepository(database_path=settings.database_path)
     number_provider = SQLiteCaseNumberProvider(database_path=settings.database_path)
     storage = FilesystemStorage(root_directory=settings.data_directory)
+    workspace_service = CaseWorkspaceService(repository=repository, storage_reader=storage)
+    download_service = ArtifactDownloadService(repository=repository, storage_reader=storage)
     import_service = DocumentImportService(
         storage=storage,
         case_factory=CaseFactory(),
@@ -223,6 +241,38 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                 "page_title": workspace.case_reference,
                 "workspace": workspace,
             },
+        )
+
+    @app.get("/cases/{case_id}/artifacts/{position}/download")
+    def download_artifact(case_id: str, position: int) -> Response:
+        if position < 0:
+            raise HTTPException(status_code=404)
+
+        try:
+            opened = download_service.open_artifact(case_id, position)
+        except ArtifactNotFoundError:
+            logger.warning("Artifact file is missing: case_id=%s position=%s", case_id, position)
+            raise HTTPException(status_code=404) from None
+        except UnsupportedStorageError:
+            logger.exception("Artifact download failed")
+            raise HTTPException(status_code=500) from None
+
+        if opened is None:
+            raise HTTPException(status_code=404)
+
+        artifact, handle = opened
+
+        def iterator() -> Iterator[bytes]:
+            try:
+                while chunk := handle.read(1024 * 1024):
+                    yield chunk
+            finally:
+                handle.close()
+
+        return StreamingResponse(
+            iterator(),
+            media_type=artifact.content_type or "application/octet-stream",
+            headers={"Content-Disposition": _build_content_disposition(artifact.display_name)},
         )
 
     return app

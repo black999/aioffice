@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from aioffice.application import CaseRepository, PersistedCase
+from aioffice.application import ArtifactRecord, CaseRepository, DownloadableArtifact, PersistedCase
 from aioffice.application.services import CaseDashboardService
 from aioffice.domain import Case, Identifier
 
@@ -9,7 +9,12 @@ from aioffice.domain import Case, Identifier
 class _FakeCaseRepository(CaseRepository):
     cases: tuple[PersistedCase, ...]
 
-    def save(self, case: Case, reference_number: int) -> None:
+    def save(
+        self,
+        case: Case,
+        reference_number: int,
+        artifact_records: tuple[ArtifactRecord, ...] | None = None,
+    ) -> None:
         msg = "save is not used in this test"
         raise NotImplementedError(msg)
 
@@ -32,6 +37,9 @@ class _FakeCaseRepository(CaseRepository):
 
     def count(self) -> int:
         return len(self.cases)
+
+    def get_artifact(self, case_id: Identifier, position: int) -> DownloadableArtifact | None:
+        return None
 
 
 def test_case_dashboard_service_returns_case_count_and_summaries() -> None:

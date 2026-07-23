@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from typing import BinaryIO
 
+from aioffice.application.storage import ArtifactNotFoundError, UnsupportedStorageError
 from aioffice.domain import StorageReference
 
 
@@ -58,6 +60,31 @@ class FilesystemStorage:
             for chunk in iter(lambda: source_file.read(_CHUNK_SIZE), b""):
                 digest.update(chunk)
         return digest.hexdigest()
+
+    def open_artifact(self, storage_reference: StorageReference) -> BinaryIO:
+        """Open an artifact for reading under the configured storage root."""
+
+        if storage_reference.storage_name != "filesystem":
+            msg = "storage provider is not supported"
+            raise UnsupportedStorageError(msg)
+
+        locator_path = Path(storage_reference.locator)
+        if locator_path.is_absolute() or ".." in locator_path.parts:
+            msg = "artifact locator is invalid"
+            raise ArtifactNotFoundError(msg)
+
+        target_path = (self.root_directory / locator_path).resolve()
+        try:
+            target_path.relative_to(self.root_directory)
+        except ValueError as error:
+            msg = "artifact locator is invalid"
+            raise ArtifactNotFoundError(msg) from error
+
+        if not target_path.is_file():
+            msg = "artifact file does not exist"
+            raise ArtifactNotFoundError(msg)
+
+        return target_path.open("rb")
 
     def _copy_and_hash(self, source_path: Path, target_path: Path) -> str:
         digest = sha256()
