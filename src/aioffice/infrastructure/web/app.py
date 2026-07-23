@@ -10,7 +10,7 @@ from threading import Lock
 from typing import AsyncIterator
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
@@ -18,6 +18,7 @@ from aioffice.application import (
     CaseClassificationError,
     CaseFactory,
     MailImportResult,
+    ReplyDraftGenerationError,
     sanitize_display_name,
 )
 from aioffice.application.services import (
@@ -28,6 +29,8 @@ from aioffice.application.services import (
     DocumentExtractionService,
     DocumentImportService,
     MailImportService,
+    ReplyDraftEditingService,
+    ReplyDraftGenerationService,
 )
 from aioffice.application.storage import ArtifactNotFoundError, UnsupportedStorageError
 from aioffice.domain import Identifier
@@ -39,11 +42,13 @@ from aioffice.infrastructure import (
     MailImportPoller,
     MailPollStatus,
     OllamaCaseClassifier,
+    OllamaReplyDraftGenerator,
     PDFTextExtractor,
     SQLiteCaseClassificationRepository,
     SQLiteCaseNumberProvider,
     SQLiteCaseRepository,
     SQLiteImportedMailRepository,
+    SQLiteReplyDraftRepository,
     StandardLibraryMailContentParser,
     WatchFolder,
 )
@@ -126,6 +131,24 @@ def _build_classification_message(request: Request) -> str | None:
     return None
 
 
+def _build_reply_draft_message(request: Request) -> str | None:
+    if request.query_params.get("reply_draft_success") == "1":
+        return "Projekt odpowiedzi zostaĹ‚ wygenerowany."
+    if request.query_params.get("reply_draft_skipped") == "1":
+        return "Projekt odpowiedzi juĹĽ istnieje."
+    if request.query_params.get("reply_draft_no_text") == "1":
+        return "Brak uĹĽytecznego tekstu do wygenerowania projektu odpowiedzi."
+    if request.query_params.get("reply_draft_error") == "1":
+        return "Nie udaĹ‚o siÄ™ wygenerowaÄ‡ projektu odpowiedzi."
+    if request.query_params.get("reply_draft_validation_error") == "1":
+        return "NieprawidĹ‚owe dane projektu odpowiedzi."
+    if request.query_params.get("reply_draft_busy") == "1":
+        return "Generowanie projektu odpowiedzi juĹĽ trwa."
+    if request.query_params.get("reply_draft_saved") == "1":
+        return "Projekt odpowiedzi zostaĹ‚ zapisany."
+    return None
+
+
 def _build_mail_polling_snapshot(
     poller: MailImportPoller | None,
 ) -> tuple[bool, int | None, MailPollStatus | None]:
@@ -155,9 +178,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
 
     repository = SQLiteCaseRepository(database_path=settings.database_path)
     classification_repository = SQLiteCaseClassificationRepository(database_path=settings.database_path)
+    reply_draft_repository = SQLiteReplyDraftRepository(database_path=settings.database_path)
     dashboard_service = CaseDashboardService(
         repository=repository,
         classification_repository=classification_repository,
+        reply_draft_repository=reply_draft_repository,
     )
 
     import_repository = SQLiteCaseRepository(database_path=settings.database_path)
@@ -167,6 +192,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         repository=repository,
         storage_reader=storage,
         classification_repository=classification_repository,
+        reply_draft_repository=reply_draft_repository,
     )
     download_service = ArtifactDownloadService(repository=repository, storage_reader=storage)
     extraction_service = DocumentExtractionService(
@@ -206,6 +232,29 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         if case_classifier is not None
         else None
     )
+    reply_draft_generator = (
+        OllamaReplyDraftGenerator(
+            base_url=settings.ollama_base_url,
+            model_name=settings.reply_draft_model or settings.ollama_model,
+            timeout_seconds=settings.reply_draft_timeout_seconds,
+        )
+        if settings.ai_reply_draft_enabled
+        else None
+    )
+    reply_draft_generation_service = (
+        ReplyDraftGenerationService(
+            case_repository=repository,
+            classification_repository=classification_repository,
+            reply_draft_repository=reply_draft_repository,
+            storage_reader=storage,
+            generator=reply_draft_generator,
+            max_input_chars=settings.reply_draft_max_input_chars,
+            max_operator_instruction_chars=settings.reply_draft_max_operator_instruction_chars,
+        )
+        if reply_draft_generator is not None
+        else None
+    )
+    reply_draft_editing_service = ReplyDraftEditingService(repository=reply_draft_repository)
     watch_folder = WatchFolder(
         watch_directory=settings.incoming_directory,
         processed_directory=settings.processed_directory,
@@ -241,6 +290,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
 
     mail_import_lock = Lock()
     classification_lock = Lock()
+    reply_draft_generation_lock = Lock()
     mail_import_poller: MailImportPoller | None = None
     if settings.imap_polling_enabled and mail_import_service is not None:
         mail_import_poller = MailImportPoller(
@@ -263,6 +313,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             watch_folder.stop()
             if imported_mail_repository is not None:
                 imported_mail_repository.close()
+            reply_draft_repository.close()
             classification_repository.close()
             repository.close()
             import_repository.close()
@@ -275,6 +326,13 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.state.classification_service = classification_service
     app.state.classification_lock = classification_lock
     app.state.ai_classification_enabled = settings.ai_classification_enabled
+    app.state.reply_draft_generation_service = reply_draft_generation_service
+    app.state.reply_draft_editing_service = reply_draft_editing_service
+    app.state.reply_draft_generation_lock = reply_draft_generation_lock
+    app.state.ai_reply_draft_enabled = settings.ai_reply_draft_enabled
+    app.state.reply_draft_max_operator_instruction_chars = (
+        settings.reply_draft_max_operator_instruction_chars
+    )
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:
@@ -322,6 +380,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             case_id,
             extraction_message=_build_extraction_message(request),
             classification_message=_build_classification_message(request),
+            reply_draft_message=_build_reply_draft_message(request),
         )
         if workspace is None:
             raise HTTPException(status_code=404)
@@ -332,6 +391,10 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                 "page_title": workspace.case_reference,
                 "workspace": workspace,
                 "classification_enabled": request.app.state.ai_classification_enabled,
+                "reply_draft_enabled": request.app.state.ai_reply_draft_enabled,
+                "reply_draft_instruction_max_chars": (
+                    request.app.state.reply_draft_max_operator_instruction_chars
+                ),
             },
         )
 
@@ -368,6 +431,84 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         if result.skipped and result.reason == "no_text":
             return RedirectResponse(url=f"/cases/{case_id}?classification_no_text=1", status_code=303)
         return RedirectResponse(url=f"/cases/{case_id}?classification_success=1", status_code=303)
+
+    @app.post("/cases/{case_id}/reply-draft/generate")
+    def generate_reply_draft(
+        case_id: str,
+        request: Request,
+        operator_instruction: str = Form(""),
+        force: bool = Form(False),
+    ) -> Response:
+        reply_draft_generation_service = request.app.state.reply_draft_generation_service
+        if reply_draft_generation_service is None:
+            return PlainTextResponse("AI reply draft generation is not configured", status_code=503)
+
+        try:
+            identifier = Identifier.from_string(case_id)
+        except ValueError:
+            raise HTTPException(status_code=404) from None
+
+        reply_draft_generation_lock = request.app.state.reply_draft_generation_lock
+        if not reply_draft_generation_lock.acquire(blocking=False):
+            return RedirectResponse(url=f"/cases/{case_id}?reply_draft_busy=1", status_code=303)
+
+        try:
+            result = reply_draft_generation_service.generate_reply_draft(
+                identifier,
+                operator_instruction=operator_instruction,
+                force=force,
+            )
+        except ValueError:
+            return RedirectResponse(
+                url=f"/cases/{case_id}?reply_draft_validation_error=1",
+                status_code=303,
+            )
+        except ReplyDraftGenerationError:
+            logger.exception("Reply draft generation failed: case_id=%s", case_id)
+            return RedirectResponse(url=f"/cases/{case_id}?reply_draft_error=1", status_code=303)
+        except Exception:
+            logger.exception("Reply draft generation failed: case_id=%s", case_id)
+            return RedirectResponse(url=f"/cases/{case_id}?reply_draft_error=1", status_code=303)
+        finally:
+            reply_draft_generation_lock.release()
+
+        if result is None:
+            raise HTTPException(status_code=404)
+        if result.skipped and result.reason == "already_generated":
+            return RedirectResponse(url=f"/cases/{case_id}?reply_draft_skipped=1", status_code=303)
+        if result.skipped and result.reason == "no_text":
+            return RedirectResponse(url=f"/cases/{case_id}?reply_draft_no_text=1", status_code=303)
+        return RedirectResponse(url=f"/cases/{case_id}?reply_draft_success=1", status_code=303)
+
+    @app.post("/cases/{case_id}/reply-draft/save")
+    def save_reply_draft(
+        case_id: str,
+        request: Request,
+        subject: str = Form(...),
+        body: str = Form(...),
+    ) -> Response:
+        reply_draft_editing_service = request.app.state.reply_draft_editing_service
+
+        try:
+            identifier = Identifier.from_string(case_id)
+        except ValueError:
+            raise HTTPException(status_code=404) from None
+
+        try:
+            draft = reply_draft_editing_service.update_reply_draft(
+                identifier,
+                subject=subject,
+                body=body,
+            )
+        except ValueError:
+            return RedirectResponse(
+                url=f"/cases/{case_id}?reply_draft_validation_error=1",
+                status_code=303,
+            )
+
+        if draft is None:
+            raise HTTPException(status_code=404)
+        return RedirectResponse(url=f"/cases/{case_id}?reply_draft_saved=1", status_code=303)
 
     @app.post("/cases/{case_id}/extract-documents")
     def extract_documents(case_id: str) -> Response:

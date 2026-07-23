@@ -204,3 +204,34 @@ Notes:
 - rerunning classification replaces the current result,
 - the model can be wrong and the result should be verified by the user,
 - the classification result does not trigger any automatic action.
+
+## Manual AI reply drafts
+
+Case Workspace can now generate a manual AI reply draft for one case at a time.
+
+Enable it with:
+
+```bash
+export AIOFFICE_AI_REPLY_DRAFT_ENABLED=true
+export AIOFFICE_REPLY_DRAFT_MODEL=qwen3:4b
+export AIOFFICE_REPLY_DRAFT_TIMEOUT_SECONDS=180
+export AIOFFICE_REPLY_DRAFT_MAX_INPUT_CHARS=150000
+export AIOFFICE_REPLY_DRAFT_MAX_OPERATOR_INSTRUCTION_CHARS=2000
+```
+
+If `AIOFFICE_REPLY_DRAFT_MODEL` is not set, AI Office uses `AIOFFICE_OLLAMA_MODEL`.
+
+Notes:
+
+- reply draft generation is disabled by default,
+- a local Ollama instance is required,
+- generation is manual from Case Workspace,
+- only `TEXT` artifacts are used as input,
+- the current classification is optional context,
+- the user can provide a short operator instruction,
+- the generated draft is stored in SQLite as one current draft per case,
+- manual editing is allowed and changes the status to `edited`,
+- regenerating replaces the current draft,
+- no email is sent automatically,
+- the model can hallucinate and every draft must be verified by a human,
+- confidential data should not be sent to an external Ollama endpoint.

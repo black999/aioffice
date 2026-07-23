@@ -103,6 +103,48 @@
                 {% endfor %}
             </ul>
         </section>
+
+        <section>
+            <h2>Projekt odpowiedzi</h2>
+            {% if workspace.reply_draft_message %}
+            <article>{{ workspace.reply_draft_message }}</article>
+            {% endif %}
+            {% if not reply_draft_enabled %}
+            <p>Generator projektu odpowiedzi nie jest skonfigurowany.</p>
+            {% elif workspace.reply_draft %}
+            <form method="post" action="/cases/{{ workspace.case_id }}/reply-draft/save">
+                <label>
+                    Temat
+                    <input type="text" name="subject" maxlength="200" value="{{ workspace.reply_draft.subject }}" required>
+                </label>
+                <label>
+                    Treść
+                    <textarea name="body" rows="12" maxlength="20000" required>{{ workspace.reply_draft.body }}</textarea>
+                </label>
+                <p>Status: {{ workspace.reply_draft.status_label }}</p>
+                <p>Model: {{ workspace.reply_draft.model_name }}</p>
+                <p>Utworzono: {{ workspace.reply_draft.created_at }}</p>
+                <p>Zaktualizowano: {{ workspace.reply_draft.updated_at }}</p>
+                {% if workspace.reply_draft.operator_instruction %}
+                <p>Instrukcja operatora: {{ workspace.reply_draft.operator_instruction }}</p>
+                {% endif %}
+                <button type="submit">Zapisz zmiany</button>
+            </form>
+            <form method="post" action="/cases/{{ workspace.case_id }}/reply-draft/generate" onsubmit="return confirm('Ponowne generowanie zastąpi bieżący projekt. Kontynuować?')">
+                <input type="hidden" name="force" value="true">
+                <input type="hidden" name="operator_instruction" value="{{ workspace.reply_draft.operator_instruction or '' }}">
+                <button type="submit">Wygeneruj ponownie</button>
+            </form>
+            {% else %}
+            <form method="post" action="/cases/{{ workspace.case_id }}/reply-draft/generate">
+                <label>
+                    Instrukcja operatora
+                    <textarea name="operator_instruction" rows="4" maxlength="{{ reply_draft_instruction_max_chars }}"></textarea>
+                </label>
+                <button type="submit">Wygeneruj projekt odpowiedzi</button>
+            </form>
+            {% endif %}
+        </section>
     </main>
 </body>
 </html>

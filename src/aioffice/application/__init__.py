@@ -35,6 +35,23 @@ from .mail import (
     ParsedMailContent,
 )
 from .repositories import ArtifactLocatorConflictError, CaseRepository, PersistedCase
+from .reply_drafts import (
+    MAX_REPLY_DRAFT_BODY_CHARS,
+    MAX_REPLY_DRAFT_SUBJECT_CHARS,
+    GeneratedReplyDraft,
+    PersistedReplyDraft,
+    ReplyDraftGenerationError,
+    ReplyDraftGenerationResult,
+    ReplyDraftGenerator,
+    ReplyDraftRepository,
+    ReplyDraftResponseError,
+    ReplyDraftStatus,
+    build_persisted_reply_draft,
+    format_reply_draft_status_label,
+    normalize_operator_instruction,
+    validate_manual_reply_draft_body,
+    validate_manual_reply_draft_subject,
+)
 from .storage import ArtifactStorageReader, DocumentStorage
 
 __all__ = [
@@ -60,8 +77,12 @@ __all__ = [
     "ExtractedDocumentText",
     "format_case_category_label",
     "format_confidence_percent",
+    "format_reply_draft_status_label",
+    "GeneratedReplyDraft",
     "MailContentParser",
     "MAX_CLASSIFICATION_RATIONALE_CHARS",
+    "MAX_REPLY_DRAFT_BODY_CHARS",
+    "MAX_REPLY_DRAFT_SUBJECT_CHARS",
     "ImportedMailConflictError",
     "ImportedMailRepository",
     "InMemoryCaseRegistry",
@@ -72,8 +93,19 @@ __all__ = [
     "ParsedMailContent",
     "PersistedCase",
     "PersistedCaseClassification",
+    "PersistedReplyDraft",
+    "ReplyDraftGenerationError",
+    "ReplyDraftGenerationResult",
+    "ReplyDraftGenerator",
+    "ReplyDraftRepository",
+    "ReplyDraftResponseError",
+    "ReplyDraftStatus",
+    "build_persisted_reply_draft",
     "ensure_unique_display_name",
     "format_case_reference",
+    "normalize_operator_instruction",
     "normalize_rationale",
     "sanitize_display_name",
+    "validate_manual_reply_draft_body",
+    "validate_manual_reply_draft_subject",
 ]

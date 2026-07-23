@@ -25,3 +25,15 @@
 - Only one current classification per case is stored; history is deferred.
 
 - Classification is opt-in through runtime configuration and disabled by default.
+
+# Manual AI reply draft decisions
+
+- One case has one current reply draft in MVP.
+
+- Reply draft generation is always a manual human-reviewed step.
+
+- Manual edits do not create history yet; they replace the current draft and set status to `edited`.
+
+- Regeneration replaces the current draft and keeps the original creation timestamp.
+
+- Ollama remains an Infrastructure adapter and Application owns the generation rules.

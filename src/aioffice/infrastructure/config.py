@@ -36,6 +36,11 @@ class AppSettings:
     ollama_model: str = "qwen2.5:7b"
     ollama_timeout_seconds: int = 120
     ai_classification_max_input_chars: int = 100_000
+    ai_reply_draft_enabled: bool = False
+    reply_draft_model: str | None = None
+    reply_draft_timeout_seconds: int = 180
+    reply_draft_max_input_chars: int = 150_000
+    reply_draft_max_operator_instruction_chars: int = 2000
 
     @classmethod
     def from_environment(cls) -> AppSettings:
@@ -85,6 +90,23 @@ class AppSettings:
         ai_classification_max_input_chars_raw = os.environ.get(
             "AIOFFICE_AI_CLASSIFICATION_MAX_INPUT_CHARS",
             "100000",
+        )
+        ai_reply_draft_enabled_raw = os.environ.get(
+            "AIOFFICE_AI_REPLY_DRAFT_ENABLED",
+            "false",
+        )
+        reply_draft_model_raw = os.environ.get("AIOFFICE_REPLY_DRAFT_MODEL")
+        reply_draft_timeout_seconds_raw = os.environ.get(
+            "AIOFFICE_REPLY_DRAFT_TIMEOUT_SECONDS",
+            "180",
+        )
+        reply_draft_max_input_chars_raw = os.environ.get(
+            "AIOFFICE_REPLY_DRAFT_MAX_INPUT_CHARS",
+            "150000",
+        )
+        reply_draft_max_operator_instruction_chars_raw = os.environ.get(
+            "AIOFFICE_REPLY_DRAFT_MAX_OPERATOR_INSTRUCTION_CHARS",
+            "2000",
         )
         try:
             port = int(port_raw)
@@ -226,6 +248,64 @@ class AppSettings:
                 f"got {ai_classification_max_input_chars}"
             )
             raise ValueError(msg)
+        ai_reply_draft_enabled = _parse_boolean(
+            "AIOFFICE_AI_REPLY_DRAFT_ENABLED",
+            ai_reply_draft_enabled_raw,
+        )
+        reply_draft_model = (
+            reply_draft_model_raw.strip()
+            if reply_draft_model_raw is not None
+            else ollama_model
+        )
+        if not reply_draft_model:
+            reply_draft_model = ollama_model
+        if ai_reply_draft_enabled and not reply_draft_model:
+            msg = "AIOFFICE_REPLY_DRAFT_MODEL must not be empty when reply drafts are enabled"
+            raise ValueError(msg)
+        try:
+            reply_draft_timeout_seconds = int(reply_draft_timeout_seconds_raw)
+        except ValueError as error:
+            msg = (
+                "AIOFFICE_REPLY_DRAFT_TIMEOUT_SECONDS must be an integer, "
+                f"got {reply_draft_timeout_seconds_raw!r}"
+            )
+            raise ValueError(msg) from error
+        if not 5 <= reply_draft_timeout_seconds <= 600:
+            msg = (
+                "AIOFFICE_REPLY_DRAFT_TIMEOUT_SECONDS must be between 5 and 600, "
+                f"got {reply_draft_timeout_seconds}"
+            )
+            raise ValueError(msg)
+        try:
+            reply_draft_max_input_chars = int(reply_draft_max_input_chars_raw)
+        except ValueError as error:
+            msg = (
+                "AIOFFICE_REPLY_DRAFT_MAX_INPUT_CHARS must be an integer, "
+                f"got {reply_draft_max_input_chars_raw!r}"
+            )
+            raise ValueError(msg) from error
+        if not 10_000 <= reply_draft_max_input_chars <= 1_000_000:
+            msg = (
+                "AIOFFICE_REPLY_DRAFT_MAX_INPUT_CHARS must be between 10000 and 1000000, "
+                f"got {reply_draft_max_input_chars}"
+            )
+            raise ValueError(msg)
+        try:
+            reply_draft_max_operator_instruction_chars = int(
+                reply_draft_max_operator_instruction_chars_raw
+            )
+        except ValueError as error:
+            msg = (
+                "AIOFFICE_REPLY_DRAFT_MAX_OPERATOR_INSTRUCTION_CHARS must be an integer, "
+                f"got {reply_draft_max_operator_instruction_chars_raw!r}"
+            )
+            raise ValueError(msg) from error
+        if not 100 <= reply_draft_max_operator_instruction_chars <= 10_000:
+            msg = (
+                "AIOFFICE_REPLY_DRAFT_MAX_OPERATOR_INSTRUCTION_CHARS must be between 100 and 10000, "
+                f"got {reply_draft_max_operator_instruction_chars}"
+            )
+            raise ValueError(msg)
 
         return cls(
             data_directory=data_directory,
@@ -253,6 +333,11 @@ class AppSettings:
             ollama_model=ollama_model,
             ollama_timeout_seconds=ollama_timeout_seconds,
             ai_classification_max_input_chars=ai_classification_max_input_chars,
+            ai_reply_draft_enabled=ai_reply_draft_enabled,
+            reply_draft_model=reply_draft_model or None,
+            reply_draft_timeout_seconds=reply_draft_timeout_seconds,
+            reply_draft_max_input_chars=reply_draft_max_input_chars,
+            reply_draft_max_operator_instruction_chars=reply_draft_max_operator_instruction_chars,
         )
 
 

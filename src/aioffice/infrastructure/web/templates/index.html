@@ -46,6 +46,7 @@
                 <tr>
                     <th scope="col">Status</th>
                     <th scope="col">Kategoria</th>
+                    <th scope="col">Projekt odpowiedzi</th>
                     <th scope="col">Case</th>
                 </tr>
             </thead>
@@ -54,11 +55,12 @@
                 <tr>
                     <td>{{ case.status }}</td>
                     <td>{{ case.category_label or "—" }}</td>
+                    <td>{{ case.reply_draft_status_label or "—" }}</td>
                     <td><a href="/cases/{{ case.case_id }}"><code>{{ case.case_reference }}</code></a></td>
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="3">No cases yet.</td>
+                    <td colspan="4">No cases yet.</td>
                 </tr>
                 {% endfor %}
             </tbody>

@@ -10,8 +10,10 @@ from aioffice.application import (
     CaseClassificationRepository,
     CaseRepository,
     DownloadableArtifact,
+    ReplyDraftRepository,
     format_case_category_label,
     format_confidence_percent,
+    format_reply_draft_status_label,
 )
 from aioffice.application.case_numbers import format_case_reference
 from aioffice.application.storage import ArtifactNotFoundError, ArtifactStorageReader, UnsupportedStorageError
@@ -53,6 +55,19 @@ class ClassificationSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class ReplyDraftSummary:
+    """Read model for a persisted reply draft."""
+
+    subject: str
+    body: str
+    status_label: str
+    model_name: str
+    operator_instruction: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True, slots=True)
 class CaseWorkspace:
     """Read model for the case workspace view."""
 
@@ -66,6 +81,8 @@ class CaseWorkspace:
     extraction_message: str | None
     classification: ClassificationSummary | None
     classification_message: str | None
+    reply_draft: ReplyDraftSummary | None
+    reply_draft_message: str | None
     artifacts: tuple[ArtifactSummary, ...]
     history: tuple[HistoryEntry, ...]
 
@@ -77,6 +94,7 @@ class CaseWorkspaceService:
     repository: CaseRepository
     storage_reader: ArtifactStorageReader
     classification_repository: CaseClassificationRepository | None = None
+    reply_draft_repository: ReplyDraftRepository | None = None
     email_body_max_bytes: int = 1024 * 1024
 
     def get_case_workspace(
@@ -85,6 +103,7 @@ class CaseWorkspaceService:
         *,
         extraction_message: str | None = None,
         classification_message: str | None = None,
+        reply_draft_message: str | None = None,
     ) -> CaseWorkspace | None:
         """Return the workspace read model for a case UUID."""
 
@@ -122,6 +141,11 @@ class CaseWorkspaceService:
             if self.classification_repository is not None
             else None
         )
+        persisted_reply_draft = (
+            self.reply_draft_repository.get(identifier)
+            if self.reply_draft_repository is not None
+            else None
+        )
         return CaseWorkspace(
             case_id=str(persisted_case.case.id),
             case_reference=format_case_reference(persisted_case.reference_number),
@@ -143,6 +167,20 @@ class CaseWorkspaceService:
                 else None
             ),
             classification_message=classification_message,
+            reply_draft=(
+                ReplyDraftSummary(
+                    subject=persisted_reply_draft.subject,
+                    body=persisted_reply_draft.body,
+                    status_label=format_reply_draft_status_label(persisted_reply_draft.status),
+                    model_name=persisted_reply_draft.model_name,
+                    operator_instruction=persisted_reply_draft.operator_instruction,
+                    created_at=persisted_reply_draft.created_at,
+                    updated_at=persisted_reply_draft.updated_at,
+                )
+                if persisted_reply_draft is not None
+                else None
+            ),
+            reply_draft_message=reply_draft_message,
             artifacts=artifacts,
             history=history,
         )

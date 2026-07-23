@@ -330,6 +330,98 @@ def test_app_settings_reads_ai_classification_configuration(monkeypatch: pytest.
     assert settings.ai_classification_max_input_chars == 200000
 
 
+def test_app_settings_defaults_reply_draft_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AIOFFICE_AI_REPLY_DRAFT_ENABLED", raising=False)
+    monkeypatch.delenv("AIOFFICE_REPLY_DRAFT_MODEL", raising=False)
+    monkeypatch.delenv("AIOFFICE_REPLY_DRAFT_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("AIOFFICE_REPLY_DRAFT_MAX_INPUT_CHARS", raising=False)
+    monkeypatch.delenv("AIOFFICE_REPLY_DRAFT_MAX_OPERATOR_INSTRUCTION_CHARS", raising=False)
+
+    settings = AppSettings.from_environment()
+
+    assert settings.ai_reply_draft_enabled is False
+    assert settings.reply_draft_model == settings.ollama_model
+    assert settings.reply_draft_timeout_seconds == 180
+    assert settings.reply_draft_max_input_chars == 150_000
+    assert settings.reply_draft_max_operator_instruction_chars == 2000
+
+
+def test_app_settings_reads_reply_draft_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_AI_REPLY_DRAFT_ENABLED", "true")
+    monkeypatch.setenv("AIOFFICE_REPLY_DRAFT_MODEL", "qwen3:4b")
+    monkeypatch.setenv("AIOFFICE_REPLY_DRAFT_TIMEOUT_SECONDS", "240")
+    monkeypatch.setenv("AIOFFICE_REPLY_DRAFT_MAX_INPUT_CHARS", "200000")
+    monkeypatch.setenv("AIOFFICE_REPLY_DRAFT_MAX_OPERATOR_INSTRUCTION_CHARS", "3000")
+
+    settings = AppSettings.from_environment()
+
+    assert settings.ai_reply_draft_enabled is True
+    assert settings.reply_draft_model == "qwen3:4b"
+    assert settings.reply_draft_timeout_seconds == 240
+    assert settings.reply_draft_max_input_chars == 200000
+    assert settings.reply_draft_max_operator_instruction_chars == 3000
+
+
+def test_app_settings_falls_back_to_ollama_model_for_blank_reply_draft_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_AI_REPLY_DRAFT_ENABLED", "true")
+    monkeypatch.setenv("AIOFFICE_OLLAMA_MODEL", "qwen2.5:14b")
+    monkeypatch.setenv("AIOFFICE_REPLY_DRAFT_MODEL", "   ")
+
+    settings = AppSettings.from_environment()
+
+    assert settings.reply_draft_model == "qwen2.5:14b"
+
+
+def test_app_settings_rejects_invalid_reply_draft_boolean(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_AI_REPLY_DRAFT_ENABLED", "maybe")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_AI_REPLY_DRAFT_ENABLED must be 'true' or 'false'",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_reply_draft_timeout_below_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_REPLY_DRAFT_TIMEOUT_SECONDS", "4")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_REPLY_DRAFT_TIMEOUT_SECONDS must be between 5 and 600",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_reply_draft_input_limit_above_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_REPLY_DRAFT_MAX_INPUT_CHARS", "1000001")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_REPLY_DRAFT_MAX_INPUT_CHARS must be between 10000 and 1000000",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_reply_draft_instruction_limit_below_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_REPLY_DRAFT_MAX_OPERATOR_INSTRUCTION_CHARS", "99")
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "AIOFFICE_REPLY_DRAFT_MAX_OPERATOR_INSTRUCTION_CHARS must be between 100 and 10000"
+        ),
+    ):
+        AppSettings.from_environment()
+
+
 def test_app_settings_rejects_invalid_ai_classification_boolean(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

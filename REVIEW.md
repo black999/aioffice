@@ -106,4 +106,19 @@
 - A local Ollama operator can access document content processed by the model.
 - External Ollama endpoints should not be used for confidential data.
 
+## Manual AI reply drafts
+
+- Reply drafts are not sent automatically.
+- There is no approval workflow yet.
+- There is no version history for drafts.
+- There are no signatures or company templates yet.
+- There is no recipient model yet.
+- Draft generation supports only Polish output in this MVP.
+- There are no legal or compliance rules beyond prompt guidance.
+- Generation is manual and is not triggered automatically after import or classification.
+- The generation lock works only inside one process.
+- There is no background queue.
+- The endpoints have no authentication yet.
+- The model can hallucinate and every draft requires human verification.
+
 No architectural change proposed.
