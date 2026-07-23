@@ -59,6 +59,9 @@ class _FakeStorageReader(ArtifactStorageReader):
             raise ArtifactNotFoundError("missing")
         return BytesIO(self.contents_by_locator[storage_reference.locator])
 
+    def get_artifact_size(self, storage_reference: StorageReference) -> int:
+        return len(self.contents_by_locator[storage_reference.locator])
+
 
 def test_case_workspace_service_returns_read_model() -> None:
     case = Case(id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
@@ -98,6 +101,8 @@ def test_case_workspace_service_returns_read_model() -> None:
     assert workspace.artifacts[0].artifact_type == "PDF"
     assert workspace.artifacts[0].display_name == "sample.pdf"
     assert workspace.artifacts[0].download_url == "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/artifacts/0/download"
+    assert workspace.artifacts[0].source_position is None
+    assert workspace.artifacts[0].is_truncated is False
     assert workspace.history[0].title == "Imported"
     assert workspace.history[0].timestamp == "2026-07-22T14:15:00+00:00"
 

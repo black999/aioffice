@@ -39,6 +39,8 @@ def test_app_settings_uses_default_values(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.imap_polling_run_immediately is False
     assert settings.imap_max_attachment_bytes == 25 * 1024 * 1024
     assert settings.imap_max_attachments_per_message == 50
+    assert settings.document_extraction_max_input_bytes == 50 * 1024 * 1024
+    assert settings.document_extraction_max_output_chars == 2_000_000
 
 
 def test_app_settings_reads_all_environment_variables(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -71,6 +73,8 @@ def test_app_settings_reads_all_environment_variables(monkeypatch: pytest.Monkey
     assert settings.imap_polling_run_immediately is True
     assert settings.imap_max_attachment_bytes == 25 * 1024 * 1024
     assert settings.imap_max_attachments_per_message == 50
+    assert settings.document_extraction_max_input_bytes == 50 * 1024 * 1024
+    assert settings.document_extraction_max_output_chars == 2_000_000
 
 
 def test_app_settings_expands_home_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -244,6 +248,64 @@ def test_app_settings_reads_imap_attachment_limits(monkeypatch: pytest.MonkeyPat
 
     assert settings.imap_max_attachment_bytes == 5 * 1024 * 1024
     assert settings.imap_max_attachments_per_message == 20
+
+
+def test_app_settings_reads_document_extraction_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_DOCUMENT_EXTRACTION_MAX_INPUT_BYTES", str(10 * 1024 * 1024))
+    monkeypatch.setenv("AIOFFICE_DOCUMENT_EXTRACTION_MAX_OUTPUT_CHARS", "123456")
+
+    settings = AppSettings.from_environment()
+
+    assert settings.document_extraction_max_input_bytes == 10 * 1024 * 1024
+    assert settings.document_extraction_max_output_chars == 123456
+
+
+def test_app_settings_rejects_document_extraction_input_below_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_DOCUMENT_EXTRACTION_MAX_INPUT_BYTES", str(1024 * 1024 - 1))
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_DOCUMENT_EXTRACTION_MAX_INPUT_BYTES must be between 1048576 and 209715200",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_document_extraction_input_above_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_DOCUMENT_EXTRACTION_MAX_INPUT_BYTES", str(200 * 1024 * 1024 + 1))
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_DOCUMENT_EXTRACTION_MAX_INPUT_BYTES must be between 1048576 and 209715200",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_document_extraction_output_below_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_DOCUMENT_EXTRACTION_MAX_OUTPUT_CHARS", "9999")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_DOCUMENT_EXTRACTION_MAX_OUTPUT_CHARS must be between 10000 and 10000000",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_document_extraction_output_above_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_DOCUMENT_EXTRACTION_MAX_OUTPUT_CHARS", "10000001")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_DOCUMENT_EXTRACTION_MAX_OUTPUT_CHARS must be between 10000 and 10000000",
+    ):
+        AppSettings.from_environment()
 
 
 def test_app_settings_rejects_imap_attachment_size_below_range(

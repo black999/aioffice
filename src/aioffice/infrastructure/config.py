@@ -29,6 +29,8 @@ class AppSettings:
     imap_polling_run_immediately: bool = False
     imap_max_attachment_bytes: int = 25 * 1024 * 1024
     imap_max_attachments_per_message: int = 50
+    document_extraction_max_input_bytes: int = 50 * 1024 * 1024
+    document_extraction_max_output_chars: int = 2_000_000
 
     @classmethod
     def from_environment(cls) -> AppSettings:
@@ -56,6 +58,14 @@ class AppSettings:
         imap_max_attachments_per_message_raw = os.environ.get(
             "AIOFFICE_IMAP_MAX_ATTACHMENTS_PER_MESSAGE",
             "50",
+        )
+        document_extraction_max_input_bytes_raw = os.environ.get(
+            "AIOFFICE_DOCUMENT_EXTRACTION_MAX_INPUT_BYTES",
+            str(50 * 1024 * 1024),
+        )
+        document_extraction_max_output_chars_raw = os.environ.get(
+            "AIOFFICE_DOCUMENT_EXTRACTION_MAX_OUTPUT_CHARS",
+            "2000000",
         )
         try:
             port = int(port_raw)
@@ -129,6 +139,34 @@ class AppSettings:
                 f"got {imap_max_attachments_per_message}"
             )
             raise ValueError(msg)
+        try:
+            document_extraction_max_input_bytes = int(document_extraction_max_input_bytes_raw)
+        except ValueError as error:
+            msg = (
+                "AIOFFICE_DOCUMENT_EXTRACTION_MAX_INPUT_BYTES must be an integer, "
+                f"got {document_extraction_max_input_bytes_raw!r}"
+            )
+            raise ValueError(msg) from error
+        if not 1024 * 1024 <= document_extraction_max_input_bytes <= 200 * 1024 * 1024:
+            msg = (
+                "AIOFFICE_DOCUMENT_EXTRACTION_MAX_INPUT_BYTES must be between 1048576 and 209715200, "
+                f"got {document_extraction_max_input_bytes}"
+            )
+            raise ValueError(msg)
+        try:
+            document_extraction_max_output_chars = int(document_extraction_max_output_chars_raw)
+        except ValueError as error:
+            msg = (
+                "AIOFFICE_DOCUMENT_EXTRACTION_MAX_OUTPUT_CHARS must be an integer, "
+                f"got {document_extraction_max_output_chars_raw!r}"
+            )
+            raise ValueError(msg) from error
+        if not 10_000 <= document_extraction_max_output_chars <= 10_000_000:
+            msg = (
+                "AIOFFICE_DOCUMENT_EXTRACTION_MAX_OUTPUT_CHARS must be between 10000 and 10000000, "
+                f"got {document_extraction_max_output_chars}"
+            )
+            raise ValueError(msg)
 
         return cls(
             data_directory=data_directory,
@@ -149,6 +187,8 @@ class AppSettings:
             imap_polling_run_immediately=imap_polling_run_immediately,
             imap_max_attachment_bytes=imap_max_attachment_bytes,
             imap_max_attachments_per_message=imap_max_attachments_per_message,
+            document_extraction_max_input_bytes=document_extraction_max_input_bytes,
+            document_extraction_max_output_chars=document_extraction_max_output_chars,
         )
 
 

@@ -853,6 +853,129 @@ def test_repository_migration_adds_artifact_metadata_columns_and_backfills_defau
     ]
 
 
+def test_repository_persists_source_position_and_truncation(tmp_path: Path) -> None:
+    repository = SQLiteCaseRepository(database_path=tmp_path / "storage" / "aioffice.db")
+    case_id = Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    source_artifact = Artifact(
+        artifact_type=ArtifactType.ATTACHMENT,
+        storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/source.pdf"),
+    )
+    text_artifact = Artifact(
+        artifact_type=ArtifactType.TEXT,
+        storage_reference=StorageReference(storage_name="filesystem", locator="artifacts/aa/bb/source.txt"),
+    )
+    case = Case(id=case_id)
+    case.add_artifact(source_artifact)
+    case.add_artifact(text_artifact)
+
+    repository.save(
+        case,
+        reference_number=1,
+        artifact_records=(
+            ArtifactRecord(
+                artifact=source_artifact,
+                display_name="source.pdf",
+                content_type="application/pdf",
+            ),
+            ArtifactRecord(
+                artifact=text_artifact,
+                display_name="source.txt",
+                content_type="text/plain; charset=utf-8",
+                source_position=0,
+                is_truncated=True,
+            ),
+        ),
+    )
+
+    loaded_case = repository.get(case_id)
+    downloadable = repository.get_artifact(case_id, 1)
+
+    assert loaded_case is not None
+    assert loaded_case.artifact_records[1].source_position == 0
+    assert loaded_case.artifact_records[1].is_truncated is True
+    assert downloadable is not None
+    assert downloadable.source_position == 0
+    assert downloadable.is_truncated is True
+    repository.close()
+
+
+def test_repository_migration_adds_source_position_and_is_truncated_columns(tmp_path: Path) -> None:
+    database_path = tmp_path / "storage" / "aioffice.db"
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        CREATE TABLE cases (
+            id TEXT PRIMARY KEY,
+            reference_number INTEGER UNIQUE NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE case_artifacts (
+            case_id TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            artifact_type TEXT NOT NULL,
+            storage_name TEXT NOT NULL,
+            locator TEXT NOT NULL,
+            display_name TEXT,
+            content_type TEXT,
+            PRIMARY KEY (case_id, position)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO case_artifacts (
+            case_id,
+            position,
+            artifact_type,
+            storage_name,
+            locator,
+            display_name,
+            content_type
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            0,
+            "attachment",
+            "filesystem",
+            "artifacts/aa/bb/source.pdf",
+            "source.pdf",
+            "application/pdf",
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    first_repository = SQLiteCaseRepository(database_path=database_path)
+    first_repository.close()
+    second_repository = SQLiteCaseRepository(database_path=database_path)
+    second_repository.close()
+
+    migrated_connection = sqlite3.connect(database_path)
+    migrated_connection.row_factory = sqlite3.Row
+    columns = {
+        row["name"]
+        for row in migrated_connection.execute("PRAGMA table_info(case_artifacts)").fetchall()
+    }
+    row = migrated_connection.execute(
+        "SELECT source_position, is_truncated FROM case_artifacts WHERE case_id = ? AND position = 0",
+        ("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",),
+    ).fetchone()
+    migrated_connection.close()
+
+    assert {"source_position", "is_truncated"}.issubset(columns)
+    assert row is not None
+    assert row["source_position"] is None
+    assert row["is_truncated"] == 0
+
+
 def test_repository_raises_for_unknown_artifact_type_in_case_artifacts(tmp_path: Path) -> None:
     database_path = tmp_path / "storage" / "aioffice.db"
     repository = SQLiteCaseRepository(database_path=database_path)

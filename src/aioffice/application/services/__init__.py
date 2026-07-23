@@ -8,6 +8,7 @@ from .case_workspace_service import (
     CaseWorkspaceService,
     HistoryEntry,
 )
+from .document_extraction_service import DocumentExtractionService
 from .document_import_service import DocumentImportService
 from .mail_import_service import MailImportService
 
@@ -18,6 +19,7 @@ __all__ = [
     "CaseSummary",
     "CaseWorkspace",
     "CaseWorkspaceService",
+    "DocumentExtractionService",
     "DocumentImportService",
     "HistoryEntry",
     "MailImportService",

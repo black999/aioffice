@@ -148,3 +148,27 @@ Still out of scope:
 - PDF preview,
 - inline attachment rendering,
 - OCR.
+
+## Manual document text extraction
+
+Case Workspace can now run manual text extraction for stored documents:
+
+- PDF files with an existing text layer are supported,
+- DOCX files are supported,
+- OCR is not performed,
+- each extracted result is stored as a separate `TEXT` artifact,
+- rerunning extraction is idempotent per source artifact position,
+- extraction is limited by input size and output text length.
+
+Runtime limits:
+
+- `AIOFFICE_DOCUMENT_EXTRACTION_MAX_INPUT_BYTES` defaults to `52428800` bytes,
+- `AIOFFICE_DOCUMENT_EXTRACTION_MAX_OUTPUT_CHARS` defaults to `2000000` characters.
+
+Notes:
+
+- scanned PDFs without a text layer are skipped,
+- `.doc` is not supported,
+- extracted text can be truncated to the configured output limit,
+- extraction is started manually from Case Workspace,
+- generated text is linked to its source artifact by position.

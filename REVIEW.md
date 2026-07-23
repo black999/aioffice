@@ -77,4 +77,16 @@
 - OCR is not implemented yet.
 - Retention rules and garbage collection for unreferenced artifacts are not implemented yet.
 
+## Document extraction
+
+- PDF extraction currently works only for PDFs that already contain a text layer.
+- Scanned PDFs still require future OCR.
+- `.doc` is not supported.
+- XLSX, ODT, and RTF are not supported.
+- Extraction is manual from Case Workspace and is not triggered automatically after import.
+- There is still no full-text index.
+- Generated text is not versioned if the source artifact changes at the same position.
+- Extracted text can be truncated to the configured output limit.
+- A failed repository save can leave an orphaned content-addressed text file in storage.
+
 No architectural change proposed.

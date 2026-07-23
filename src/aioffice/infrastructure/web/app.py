@@ -19,16 +19,20 @@ from aioffice.application.services import (
     ArtifactDownloadService,
     CaseDashboardService,
     CaseWorkspaceService,
+    DocumentExtractionService,
     DocumentImportService,
     MailImportService,
 )
 from aioffice.application.storage import ArtifactNotFoundError, UnsupportedStorageError
+from aioffice.domain import Identifier
 from aioffice.infrastructure import (
     AppSettings,
+    DOCXTextExtractor,
     FilesystemStorage,
     IMAPMailboxClient,
     MailImportPoller,
     MailPollStatus,
+    PDFTextExtractor,
     SQLiteCaseNumberProvider,
     SQLiteCaseRepository,
     SQLiteImportedMailRepository,
@@ -83,6 +87,23 @@ def _build_mail_import_redirect(result: MailImportResult) -> RedirectResponse:
     )
 
 
+def _build_extraction_message(request: Request) -> str | None:
+    if request.query_params.get("extract_error") == "1":
+        return "Nie udało się uruchomić ekstrakcji tekstu z dokumentów."
+
+    extracted = _parse_non_negative_int(request.query_params.get("extracted"))
+    skipped = _parse_non_negative_int(request.query_params.get("skipped"))
+    failed = _parse_non_negative_int(request.query_params.get("failed"))
+    if extracted is None or skipped is None or failed is None:
+        return None
+    if extracted == 0 and failed == 0 and skipped > 0:
+        return f"Nie znaleziono tekstu do wyodrębnienia. Pominięto: {skipped}."
+    return (
+        "Ekstrakcja zakończona. "
+        f"Wyodrębniono: {extracted}, pominięto: {skipped}, błędy: {failed}."
+    )
+
+
 def _build_mail_polling_snapshot(
     poller: MailImportPoller | None,
 ) -> tuple[bool, int | None, MailPollStatus | None]:
@@ -118,6 +139,17 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     storage = FilesystemStorage(root_directory=settings.data_directory)
     workspace_service = CaseWorkspaceService(repository=repository, storage_reader=storage)
     download_service = ArtifactDownloadService(repository=repository, storage_reader=storage)
+    extraction_service = DocumentExtractionService(
+        repository=import_repository,
+        storage=storage,
+        storage_reader=storage,
+        extractors=(
+            PDFTextExtractor(),
+            DOCXTextExtractor(max_xml_bytes=settings.document_extraction_max_input_bytes),
+        ),
+        max_input_bytes=settings.document_extraction_max_input_bytes,
+        max_output_chars=settings.document_extraction_max_output_chars,
+    )
     import_service = DocumentImportService(
         storage=storage,
         case_factory=CaseFactory(),
@@ -231,7 +263,10 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
 
     @app.get("/cases/{case_id}", response_class=HTMLResponse)
     def case_workspace(request: Request, case_id: str) -> HTMLResponse:
-        workspace = workspace_service.get_case_workspace(case_id)
+        workspace = workspace_service.get_case_workspace(
+            case_id,
+            extraction_message=_build_extraction_message(request),
+        )
         if workspace is None:
             raise HTTPException(status_code=404)
         return _TEMPLATES.TemplateResponse(
@@ -241,6 +276,31 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                 "page_title": workspace.case_reference,
                 "workspace": workspace,
             },
+        )
+
+    @app.post("/cases/{case_id}/extract-documents")
+    def extract_documents(case_id: str) -> Response:
+        try:
+            identifier = Identifier.from_string(case_id)
+        except ValueError:
+            raise HTTPException(status_code=404) from None
+
+        try:
+            result = extraction_service.extract_case_documents(identifier)
+        except Exception:
+            logger.exception("Document extraction use case failed")
+            return RedirectResponse(url=f"/cases/{case_id}?extract_error=1", status_code=303)
+
+        if result is None:
+            raise HTTPException(status_code=404)
+        return RedirectResponse(
+            url=(
+                f"/cases/{case_id}"
+                f"?extracted={result.extracted}"
+                f"&skipped={result.skipped}"
+                f"&failed={result.failed}"
+            ),
+            status_code=303,
         )
 
     @app.get("/cases/{case_id}/artifacts/{position}/download")

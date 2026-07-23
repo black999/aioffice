@@ -22,6 +22,8 @@ class ArtifactSummary:
     display_name: str
     content_type: str | None
     download_url: str
+    source_position: int | None
+    is_truncated: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +45,7 @@ class CaseWorkspace:
     email_body: str | None
     email_body_truncated: bool
     email_body_error: bool
+    extraction_message: str | None
     artifacts: tuple[ArtifactSummary, ...]
     history: tuple[HistoryEntry, ...]
 
@@ -55,7 +58,12 @@ class CaseWorkspaceService:
     storage_reader: ArtifactStorageReader
     email_body_max_bytes: int = 1024 * 1024
 
-    def get_case_workspace(self, case_id: str) -> CaseWorkspace | None:
+    def get_case_workspace(
+        self,
+        case_id: str,
+        *,
+        extraction_message: str | None = None,
+    ) -> CaseWorkspace | None:
         """Return the workspace read model for a case UUID."""
 
         try:
@@ -79,6 +87,8 @@ class CaseWorkspaceService:
                 display_name=record.display_name,
                 content_type=record.content_type,
                 download_url=f"/cases/{persisted_case.case.id}/artifacts/{position}/download",
+                source_position=record.source_position,
+                is_truncated=record.is_truncated,
             )
             for position, record in enumerate(persisted_case.artifact_records)
         )
@@ -93,6 +103,7 @@ class CaseWorkspaceService:
             email_body=email_body,
             email_body_truncated=email_body_truncated,
             email_body_error=email_body_error,
+            extraction_message=extraction_message,
             artifacts=artifacts,
             history=history,
         )
@@ -103,7 +114,7 @@ class CaseWorkspaceService:
     ) -> tuple[str | None, bool, bool]:
         text_record: ArtifactRecord | None = None
         for record in artifact_records:
-            if record.artifact.artifact_type is ArtifactType.TEXT:
+            if record.artifact.artifact_type is ArtifactType.TEXT and record.source_position is None:
                 text_record = record
                 break
 

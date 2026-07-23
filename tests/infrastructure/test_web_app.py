@@ -10,7 +10,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from aioffice.application import ArtifactRecord, MailImportResult
+from aioffice.application import ArtifactRecord, DocumentExtractionResult, MailImportResult
 from aioffice.domain import Artifact, ArtifactType, Case, Identifier, StorageReference
 from aioffice.infrastructure import (
     AppSettings,
@@ -293,7 +293,8 @@ def test_get_case_workspace_returns_http_200_and_displays_case_workspace(tmp_pat
     assert "Created" in response.text
     assert "Imported" in response.text
     assert "No artifacts" in response.text
-    assert "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" not in response.text
+    heading = response.text.split("<h1>", maxsplit=1)[1].split("</h1>", maxsplit=1)[0]
+    assert "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" not in heading
 
 
 def test_get_case_workspace_displays_artifact(tmp_path: Path) -> None:
@@ -559,6 +560,160 @@ def test_download_artifact_returns_404_for_path_traversal_locator(tmp_path: Path
 
     assert response.status_code == 404
     assert response.text != "secret"
+
+
+def test_case_workspace_shows_extract_button(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _save_case(settings.database_path)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    assert response.status_code == 200
+    assert 'action="/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/extract-documents"' in response.text
+    assert "Wyodrębnij tekst z dokumentów" in response.text
+
+
+def test_case_workspace_shows_extraction_success_message(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _save_case(settings.database_path)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa?extracted=2&skipped=1&failed=0")
+
+    assert response.status_code == 200
+    assert "Ekstrakcja zakończona. Wyodrębniono: 2, pominięto: 1, błędy: 0." in response.text
+
+
+def test_case_workspace_shows_no_text_message(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _save_case(settings.database_path)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa?extracted=0&skipped=1&failed=0")
+
+    assert response.status_code == 200
+    assert "Nie znaleziono tekstu do wyodrębnienia. Pominięto: 1." in response.text
+
+
+def test_case_workspace_shows_generated_text_metadata(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    records = (
+        _artifact_record(
+            artifact_type=ArtifactType.ATTACHMENT,
+            locator="artifacts/aa/bb/source.pdf",
+            display_name="source.pdf",
+            content_type="application/pdf",
+        ),
+        _artifact_record(
+            artifact_type=ArtifactType.TEXT,
+            locator="artifacts/aa/bb/source.txt",
+            display_name="source.txt",
+            content_type="text/plain; charset=utf-8",
+        ),
+    )
+    _write_artifact(settings.data_directory, "artifacts/aa/bb/source.txt", b"Extracted text")
+    adjusted_records = (
+        records[0],
+        ArtifactRecord(
+            artifact=records[1].artifact,
+            display_name=records[1].display_name,
+            content_type=records[1].content_type,
+            source_position=0,
+            is_truncated=True,
+        ),
+    )
+    _save_case(settings.database_path, artifact_records=adjusted_records)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    assert response.status_code == 200
+    assert "Źródło: artefakt 0" in response.text
+    assert "Tekst został przycięty do limitu." in response.text
+
+
+def test_extract_documents_endpoint_redirects_with_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+    _save_case(settings.database_path)
+
+    def extract_case_documents(self, case_id: Identifier):
+        return DocumentExtractionResult(extracted=2, skipped=1, failed=0)
+
+    monkeypatch.setattr(
+        "aioffice.application.services.document_extraction_service.DocumentExtractionService.extract_case_documents",
+        extract_case_documents,
+    )
+
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/extract-documents",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa?extracted=2&skipped=1&failed=0"
+
+
+def test_extract_documents_endpoint_returns_404_for_invalid_identifier(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.post("/cases/not-a-uuid/extract-documents", follow_redirects=False)
+
+    assert response.status_code == 404
+
+
+def test_extract_documents_endpoint_returns_404_for_missing_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+
+    def extract_case_documents(self, case_id: Identifier):
+        return None
+
+    monkeypatch.setattr(
+        "aioffice.application.services.document_extraction_service.DocumentExtractionService.extract_case_documents",
+        extract_case_documents,
+    )
+
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/extract-documents",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 404
+
+
+def test_extract_documents_endpoint_redirects_with_generic_error_on_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(tmp_path)
+    _save_case(settings.database_path)
+
+    def extract_case_documents(self, case_id: Identifier):
+        raise RuntimeError("secret internal failure")
+
+    monkeypatch.setattr(
+        "aioffice.application.services.document_extraction_service.DocumentExtractionService.extract_case_documents",
+        extract_case_documents,
+    )
+
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/extract-documents",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert "Nie udało się uruchomić ekstrakcji tekstu z dokumentów." in response.text
+    assert "secret internal failure" not in response.text
 
 
 def test_create_app_uses_passed_database_path(tmp_path: Path) -> None:

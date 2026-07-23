@@ -148,6 +148,15 @@ def test_open_artifact_reads_existing_file(tmp_path: Path) -> None:
     assert content == b"contract-data"
 
 
+def test_get_artifact_size_returns_size_without_exposing_path(tmp_path: Path) -> None:
+    source_path = tmp_path / "offer.pdf"
+    source_path.write_bytes(b"contract-data")
+    storage = FilesystemStorage(root_directory=tmp_path)
+    reference = storage.store_file(source_path)
+
+    assert storage.get_artifact_size(reference) == len(b"contract-data")
+
+
 def test_open_artifact_raises_controlled_error_for_missing_file(tmp_path: Path) -> None:
     storage = FilesystemStorage(root_directory=tmp_path)
 

@@ -113,6 +113,8 @@ class SQLiteCaseRepository(CaseRepository):
                         record.artifact.storage_reference.locator,
                         record.display_name,
                         record.content_type,
+                        record.source_position,
+                        1 if record.is_truncated else 0,
                     )
                     for position, record in enumerate(records_to_persist)
                 ]
@@ -126,9 +128,11 @@ class SQLiteCaseRepository(CaseRepository):
                             storage_name,
                             locator,
                             display_name,
-                            content_type
+                            content_type,
+                            source_position,
+                            is_truncated
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         artifact_rows,
                     )
@@ -232,7 +236,16 @@ class SQLiteCaseRepository(CaseRepository):
         with self._lock:
             row = self._connection.execute(
                 """
-                SELECT case_id, position, artifact_type, storage_name, locator, display_name, content_type
+                SELECT
+                    case_id,
+                    position,
+                    artifact_type,
+                    storage_name,
+                    locator,
+                    display_name,
+                    content_type,
+                    source_position,
+                    is_truncated
                 FROM case_artifacts
                 WHERE case_id = ? AND position = ?
                 """,
@@ -268,6 +281,12 @@ class SQLiteCaseRepository(CaseRepository):
                         if artifact_row["content_type"] is not None
                         else None
                     ),
+                    source_position=(
+                        int(artifact_row["source_position"])
+                        if artifact_row["source_position"] is not None
+                        else None
+                    ),
+                    is_truncated=bool(artifact_row["is_truncated"]),
                 )
             )
         case.pull_events()
@@ -311,6 +330,8 @@ class SQLiteCaseRepository(CaseRepository):
                     locator TEXT NOT NULL,
                     display_name TEXT,
                     content_type TEXT,
+                    source_position INTEGER,
+                    is_truncated INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (case_id, position),
                     FOREIGN KEY (case_id) REFERENCES cases(id)
                 )
@@ -352,6 +373,12 @@ class SQLiteCaseRepository(CaseRepository):
                 self._connection.execute("ALTER TABLE case_artifacts ADD COLUMN display_name TEXT")
             if "content_type" not in artifact_columns:
                 self._connection.execute("ALTER TABLE case_artifacts ADD COLUMN content_type TEXT")
+            if "source_position" not in artifact_columns:
+                self._connection.execute("ALTER TABLE case_artifacts ADD COLUMN source_position INTEGER")
+            if "is_truncated" not in artifact_columns:
+                self._connection.execute(
+                    "ALTER TABLE case_artifacts ADD COLUMN is_truncated INTEGER NOT NULL DEFAULT 0"
+                )
             self._connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS ix_cases_primary_artifact_locator
@@ -471,7 +498,16 @@ class SQLiteCaseRepository(CaseRepository):
         placeholders = ", ".join("?" for _ in case_ids)
         rows = self._connection.execute(
             f"""
-            SELECT case_id, position, artifact_type, storage_name, locator, display_name, content_type
+            SELECT
+                case_id,
+                position,
+                artifact_type,
+                storage_name,
+                locator,
+                display_name,
+                content_type,
+                source_position,
+                is_truncated
             FROM case_artifacts
             WHERE case_id IN ({placeholders})
             ORDER BY case_id ASC, position ASC
@@ -491,6 +527,8 @@ class SQLiteCaseRepository(CaseRepository):
             ),
             display_name=str(row["display_name"]),
             content_type=str(row["content_type"]) if row["content_type"] is not None else None,
+            source_position=int(row["source_position"]) if row["source_position"] is not None else None,
+            is_truncated=bool(row["is_truncated"]),
         )
 
     def _default_display_name(self, artifact_type: ArtifactType) -> str:

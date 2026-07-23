@@ -11,6 +11,14 @@
         <p><a href="/">Back to cases</a></p>
         <h1>Sprawa {{ workspace.case_reference }}</h1>
 
+        <form method="post" action="/cases/{{ workspace.case_id }}/extract-documents">
+            <button type="submit">Wyodrębnij tekst z dokumentów</button>
+        </form>
+
+        {% if workspace.extraction_message %}
+        <article>{{ workspace.extraction_message }}</article>
+        {% endif %}
+
         <section>
             <h2>Status</h2>
             <p>{{ workspace.status }}</p>
@@ -45,6 +53,12 @@
                     - {{ artifact.display_name }}
                     {% if artifact.content_type %}
                     ({{ artifact.content_type }})
+                    {% endif %}
+                    {% if artifact.source_position is not none %}
+                    Źródło: artefakt {{ artifact.source_position }}
+                    {% endif %}
+                    {% if artifact.is_truncated %}
+                    Tekst został przycięty do limitu.
                     {% endif %}
                     <a href="{{ artifact.download_url }}">Pobierz</a>
                 </li>

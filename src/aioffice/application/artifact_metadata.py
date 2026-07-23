@@ -18,6 +18,8 @@ class ArtifactRecord:
     artifact: Artifact
     display_name: str
     content_type: str | None
+    source_position: int | None = None
+    is_truncated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +32,8 @@ class DownloadableArtifact:
     storage_reference: StorageReference
     display_name: str
     content_type: str | None
+    source_position: int | None = None
+    is_truncated: bool = False
 
 
 def sanitize_display_name(

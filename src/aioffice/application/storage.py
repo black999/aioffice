@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import BinaryIO
 from pathlib import Path
+from typing import BinaryIO
 from typing import Protocol
 
 from aioffice.domain import StorageReference
@@ -29,3 +29,6 @@ class ArtifactStorageReader(Protocol):
 
     def open_artifact(self, storage_reference: StorageReference) -> BinaryIO:
         """Open an artifact for binary reading."""
+
+    def get_artifact_size(self, storage_reference: StorageReference) -> int:
+        """Return the artifact size in bytes."""
