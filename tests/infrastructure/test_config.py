@@ -41,6 +41,11 @@ def test_app_settings_uses_default_values(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.imap_max_attachments_per_message == 50
     assert settings.document_extraction_max_input_bytes == 50 * 1024 * 1024
     assert settings.document_extraction_max_output_chars == 2_000_000
+    assert settings.ai_classification_enabled is False
+    assert settings.ollama_base_url == "http://127.0.0.1:11434"
+    assert settings.ollama_model == "qwen2.5:7b"
+    assert settings.ollama_timeout_seconds == 120
+    assert settings.ai_classification_max_input_chars == 100_000
 
 
 def test_app_settings_reads_all_environment_variables(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -75,6 +80,7 @@ def test_app_settings_reads_all_environment_variables(monkeypatch: pytest.Monkey
     assert settings.imap_max_attachments_per_message == 50
     assert settings.document_extraction_max_input_bytes == 50 * 1024 * 1024
     assert settings.document_extraction_max_output_chars == 2_000_000
+    assert settings.ai_classification_enabled is False
 
 
 def test_app_settings_expands_home_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -304,6 +310,95 @@ def test_app_settings_rejects_document_extraction_output_above_range(
     with pytest.raises(
         ValueError,
         match="AIOFFICE_DOCUMENT_EXTRACTION_MAX_OUTPUT_CHARS must be between 10000 and 10000000",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_reads_ai_classification_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_AI_CLASSIFICATION_ENABLED", "true")
+    monkeypatch.setenv("AIOFFICE_OLLAMA_BASE_URL", "http://ollama.local:11434/")
+    monkeypatch.setenv("AIOFFICE_OLLAMA_MODEL", "qwen2.5:14b")
+    monkeypatch.setenv("AIOFFICE_OLLAMA_TIMEOUT_SECONDS", "180")
+    monkeypatch.setenv("AIOFFICE_AI_CLASSIFICATION_MAX_INPUT_CHARS", "200000")
+
+    settings = AppSettings.from_environment()
+
+    assert settings.ai_classification_enabled is True
+    assert settings.ollama_base_url == "http://ollama.local:11434"
+    assert settings.ollama_model == "qwen2.5:14b"
+    assert settings.ollama_timeout_seconds == 180
+    assert settings.ai_classification_max_input_chars == 200000
+
+
+def test_app_settings_rejects_invalid_ai_classification_boolean(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_AI_CLASSIFICATION_ENABLED", "maybe")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_AI_CLASSIFICATION_ENABLED must be 'true' or 'false'",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_invalid_ollama_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_OLLAMA_BASE_URL", "ftp://example.com")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_OLLAMA_BASE_URL must start with 'http://' or 'https://'",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_empty_ollama_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_OLLAMA_MODEL", "   ")
+
+    with pytest.raises(ValueError, match="AIOFFICE_OLLAMA_MODEL must not be empty"):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_ollama_timeout_below_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_OLLAMA_TIMEOUT_SECONDS", "4")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_OLLAMA_TIMEOUT_SECONDS must be between 5 and 600",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_ollama_timeout_above_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_OLLAMA_TIMEOUT_SECONDS", "601")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_OLLAMA_TIMEOUT_SECONDS must be between 5 and 600",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_ai_classification_input_below_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_AI_CLASSIFICATION_MAX_INPUT_CHARS", "9999")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_AI_CLASSIFICATION_MAX_INPUT_CHARS must be between 10000 and 1000000",
+    ):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_ai_classification_input_above_range(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOFFICE_AI_CLASSIFICATION_MAX_INPUT_CHARS", "1000001")
+
+    with pytest.raises(
+        ValueError,
+        match="AIOFFICE_AI_CLASSIFICATION_MAX_INPUT_CHARS must be between 10000 and 1000000",
     ):
         AppSettings.from_environment()
 

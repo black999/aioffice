@@ -172,3 +172,35 @@ Notes:
 - extracted text can be truncated to the configured output limit,
 - extraction is started manually from Case Workspace,
 - generated text is linked to its source artifact by position.
+
+## Manual AI case classification
+
+Case Workspace can now run a manual local AI classification for one case at a time.
+
+Enable it with:
+
+```bash
+export AIOFFICE_AI_CLASSIFICATION_ENABLED=true
+export AIOFFICE_OLLAMA_BASE_URL=http://127.0.0.1:11434
+export AIOFFICE_OLLAMA_MODEL=qwen2.5:7b
+export AIOFFICE_OLLAMA_TIMEOUT_SECONDS=120
+export AIOFFICE_AI_CLASSIFICATION_MAX_INPUT_CHARS=100000
+```
+
+AI Office expects a local Ollama instance and a pulled model, for example:
+
+```bash
+ollama pull qwen2.5:7b
+```
+
+Notes:
+
+- classification is disabled by default,
+- classification is triggered manually from Case Workspace,
+- only `TEXT` artifacts are used as input,
+- supported categories are `general`, `invoice`, `complaint`, `request`, `contract`, `official_letter`, `technical_support`, and `other`,
+- multiple `TEXT` artifacts are combined in artifact order with technical separators based on `display_name`,
+- input text can be truncated to `AIOFFICE_AI_CLASSIFICATION_MAX_INPUT_CHARS`,
+- rerunning classification replaces the current result,
+- the model can be wrong and the result should be verified by the user,
+- the classification result does not trigger any automatic action.

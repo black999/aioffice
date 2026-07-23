@@ -20,6 +20,32 @@
         {% endif %}
 
         <section>
+            <h2>Klasyfikacja AI</h2>
+            {% if workspace.classification_message %}
+            <article>{{ workspace.classification_message }}</article>
+            {% endif %}
+            {% if workspace.classification %}
+            <p>Kategoria: {{ workspace.classification.category_label }}</p>
+            <p>Pewność: {{ workspace.classification.confidence_percent }}</p>
+            <p>Model: {{ workspace.classification.model_name }}</p>
+            <p>Data klasyfikacji: {{ workspace.classification.classified_at }}</p>
+            <p>Uzasadnienie: {{ workspace.classification.rationale }}</p>
+            {% if classification_enabled %}
+            <form method="post" action="/cases/{{ workspace.case_id }}/classify?force=true">
+                <button type="submit">Klasyfikuj ponownie</button>
+            </form>
+            {% endif %}
+            {% elif classification_enabled %}
+            <p>Sprawa nie została jeszcze sklasyfikowana.</p>
+            <form method="post" action="/cases/{{ workspace.case_id }}/classify">
+                <button type="submit">Klasyfikuj sprawę</button>
+            </form>
+            {% else %}
+            <p>Klasyfikacja AI nie jest skonfigurowana.</p>
+            {% endif %}
+        </section>
+
+        <section>
             <h2>Status</h2>
             <p>{{ workspace.status }}</p>
         </section>

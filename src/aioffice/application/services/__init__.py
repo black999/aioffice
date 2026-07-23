@@ -1,11 +1,13 @@
 """Application services."""
 
 from .case_dashboard_service import CaseDashboardService, CaseSummary
+from .case_classification_service import CaseClassificationService
 from .case_workspace_service import (
     ArtifactDownloadService,
     ArtifactSummary,
     CaseWorkspace,
     CaseWorkspaceService,
+    ClassificationSummary,
     HistoryEntry,
 )
 from .document_extraction_service import DocumentExtractionService
@@ -15,10 +17,12 @@ from .mail_import_service import MailImportService
 __all__ = [
     "ArtifactDownloadService",
     "ArtifactSummary",
+    "CaseClassificationService",
     "CaseDashboardService",
     "CaseSummary",
     "CaseWorkspace",
     "CaseWorkspaceService",
+    "ClassificationSummary",
     "DocumentExtractionService",
     "DocumentImportService",
     "HistoryEntry",

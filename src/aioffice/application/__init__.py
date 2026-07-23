@@ -1,6 +1,21 @@
 """Application layer for AI Office."""
 
 from .artifact_metadata import ArtifactRecord, DownloadableArtifact, ensure_unique_display_name, sanitize_display_name
+from .classification import (
+    MAX_CLASSIFICATION_RATIONALE_CHARS,
+    CaseCategory,
+    CaseClassification,
+    CaseClassificationError,
+    CaseClassificationRepository,
+    CaseClassificationResponseError,
+    CaseClassificationResult,
+    CaseClassifier,
+    PersistedCaseClassification,
+    build_persisted_case_classification,
+    format_case_category_label,
+    format_confidence_percent,
+    normalize_rationale,
+)
 from .case_numbers import CaseNumberProvider, format_case_reference
 from .cases import CaseFactory, InMemoryCaseRegistry
 from .document_extraction import (
@@ -27,6 +42,14 @@ __all__ = [
     "ArtifactLocatorConflictError",
     "ArtifactRecord",
     "ArtifactStorageReader",
+    "build_persisted_case_classification",
+    "CaseCategory",
+    "CaseClassification",
+    "CaseClassificationError",
+    "CaseClassificationRepository",
+    "CaseClassificationResponseError",
+    "CaseClassificationResult",
+    "CaseClassifier",
     "CaseNumberProvider",
     "CaseRepository",
     "DocumentStorage",
@@ -35,7 +58,10 @@ __all__ = [
     "DocumentTextExtractor",
     "DownloadableArtifact",
     "ExtractedDocumentText",
+    "format_case_category_label",
+    "format_confidence_percent",
     "MailContentParser",
+    "MAX_CLASSIFICATION_RATIONALE_CHARS",
     "ImportedMailConflictError",
     "ImportedMailRepository",
     "InMemoryCaseRegistry",
@@ -45,7 +71,9 @@ __all__ = [
     "ParsedAttachment",
     "ParsedMailContent",
     "PersistedCase",
+    "PersistedCaseClassification",
     "ensure_unique_display_name",
     "format_case_reference",
+    "normalize_rationale",
     "sanitize_display_name",
 ]

@@ -31,6 +31,11 @@ class AppSettings:
     imap_max_attachments_per_message: int = 50
     document_extraction_max_input_bytes: int = 50 * 1024 * 1024
     document_extraction_max_output_chars: int = 2_000_000
+    ai_classification_enabled: bool = False
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "qwen2.5:7b"
+    ollama_timeout_seconds: int = 120
+    ai_classification_max_input_chars: int = 100_000
 
     @classmethod
     def from_environment(cls) -> AppSettings:
@@ -66,6 +71,20 @@ class AppSettings:
         document_extraction_max_output_chars_raw = os.environ.get(
             "AIOFFICE_DOCUMENT_EXTRACTION_MAX_OUTPUT_CHARS",
             "2000000",
+        )
+        ai_classification_enabled_raw = os.environ.get(
+            "AIOFFICE_AI_CLASSIFICATION_ENABLED",
+            "false",
+        )
+        ollama_base_url_raw = os.environ.get(
+            "AIOFFICE_OLLAMA_BASE_URL",
+            "http://127.0.0.1:11434",
+        )
+        ollama_model_raw = os.environ.get("AIOFFICE_OLLAMA_MODEL", "qwen2.5:7b")
+        ollama_timeout_seconds_raw = os.environ.get("AIOFFICE_OLLAMA_TIMEOUT_SECONDS", "120")
+        ai_classification_max_input_chars_raw = os.environ.get(
+            "AIOFFICE_AI_CLASSIFICATION_MAX_INPUT_CHARS",
+            "100000",
         )
         try:
             port = int(port_raw)
@@ -167,6 +186,46 @@ class AppSettings:
                 f"got {document_extraction_max_output_chars}"
             )
             raise ValueError(msg)
+        ai_classification_enabled = _parse_boolean(
+            "AIOFFICE_AI_CLASSIFICATION_ENABLED",
+            ai_classification_enabled_raw,
+        )
+        ollama_base_url = ollama_base_url_raw.strip().rstrip("/")
+        if not ollama_base_url.startswith(("http://", "https://")):
+            msg = "AIOFFICE_OLLAMA_BASE_URL must start with 'http://' or 'https://'"
+            raise ValueError(msg)
+        ollama_model = ollama_model_raw.strip()
+        if not ollama_model:
+            msg = "AIOFFICE_OLLAMA_MODEL must not be empty"
+            raise ValueError(msg)
+        try:
+            ollama_timeout_seconds = int(ollama_timeout_seconds_raw)
+        except ValueError as error:
+            msg = (
+                "AIOFFICE_OLLAMA_TIMEOUT_SECONDS must be an integer, "
+                f"got {ollama_timeout_seconds_raw!r}"
+            )
+            raise ValueError(msg) from error
+        if not 5 <= ollama_timeout_seconds <= 600:
+            msg = (
+                "AIOFFICE_OLLAMA_TIMEOUT_SECONDS must be between 5 and 600, "
+                f"got {ollama_timeout_seconds}"
+            )
+            raise ValueError(msg)
+        try:
+            ai_classification_max_input_chars = int(ai_classification_max_input_chars_raw)
+        except ValueError as error:
+            msg = (
+                "AIOFFICE_AI_CLASSIFICATION_MAX_INPUT_CHARS must be an integer, "
+                f"got {ai_classification_max_input_chars_raw!r}"
+            )
+            raise ValueError(msg) from error
+        if not 10_000 <= ai_classification_max_input_chars <= 1_000_000:
+            msg = (
+                "AIOFFICE_AI_CLASSIFICATION_MAX_INPUT_CHARS must be between 10000 and 1000000, "
+                f"got {ai_classification_max_input_chars}"
+            )
+            raise ValueError(msg)
 
         return cls(
             data_directory=data_directory,
@@ -189,6 +248,11 @@ class AppSettings:
             imap_max_attachments_per_message=imap_max_attachments_per_message,
             document_extraction_max_input_bytes=document_extraction_max_input_bytes,
             document_extraction_max_output_chars=document_extraction_max_output_chars,
+            ai_classification_enabled=ai_classification_enabled,
+            ollama_base_url=ollama_base_url,
+            ollama_model=ollama_model,
+            ollama_timeout_seconds=ollama_timeout_seconds,
+            ai_classification_max_input_chars=ai_classification_max_input_chars,
         )
 
 

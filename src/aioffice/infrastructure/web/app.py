@@ -14,9 +14,15 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from aioffice.application import CaseFactory, MailImportResult, sanitize_display_name
+from aioffice.application import (
+    CaseClassificationError,
+    CaseFactory,
+    MailImportResult,
+    sanitize_display_name,
+)
 from aioffice.application.services import (
     ArtifactDownloadService,
+    CaseClassificationService,
     CaseDashboardService,
     CaseWorkspaceService,
     DocumentExtractionService,
@@ -32,7 +38,9 @@ from aioffice.infrastructure import (
     IMAPMailboxClient,
     MailImportPoller,
     MailPollStatus,
+    OllamaCaseClassifier,
     PDFTextExtractor,
+    SQLiteCaseClassificationRepository,
     SQLiteCaseNumberProvider,
     SQLiteCaseRepository,
     SQLiteImportedMailRepository,
@@ -104,6 +112,20 @@ def _build_extraction_message(request: Request) -> str | None:
     )
 
 
+def _build_classification_message(request: Request) -> str | None:
+    if request.query_params.get("classification_success") == "1":
+        return "Klasyfikacja sprawy zakończona."
+    if request.query_params.get("classification_skipped") == "1":
+        return "Sprawa została już sklasyfikowana."
+    if request.query_params.get("classification_no_text") == "1":
+        return "Brak użytecznego tekstu do klasyfikacji sprawy."
+    if request.query_params.get("classification_error") == "1":
+        return "Nie udało się sklasyfikować sprawy."
+    if request.query_params.get("classification_busy") == "1":
+        return "Klasyfikacja już trwa."
+    return None
+
+
 def _build_mail_polling_snapshot(
     poller: MailImportPoller | None,
 ) -> tuple[bool, int | None, MailPollStatus | None]:
@@ -132,12 +154,20 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         settings = AppSettings.from_environment()
 
     repository = SQLiteCaseRepository(database_path=settings.database_path)
-    dashboard_service = CaseDashboardService(repository=repository)
+    classification_repository = SQLiteCaseClassificationRepository(database_path=settings.database_path)
+    dashboard_service = CaseDashboardService(
+        repository=repository,
+        classification_repository=classification_repository,
+    )
 
     import_repository = SQLiteCaseRepository(database_path=settings.database_path)
     number_provider = SQLiteCaseNumberProvider(database_path=settings.database_path)
     storage = FilesystemStorage(root_directory=settings.data_directory)
-    workspace_service = CaseWorkspaceService(repository=repository, storage_reader=storage)
+    workspace_service = CaseWorkspaceService(
+        repository=repository,
+        storage_reader=storage,
+        classification_repository=classification_repository,
+    )
     download_service = ArtifactDownloadService(repository=repository, storage_reader=storage)
     extraction_service = DocumentExtractionService(
         repository=import_repository,
@@ -155,6 +185,26 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         case_factory=CaseFactory(),
         case_repository=import_repository,
         case_number_provider=number_provider,
+    )
+    case_classifier = (
+        OllamaCaseClassifier(
+            base_url=settings.ollama_base_url,
+            model_name=settings.ollama_model,
+            timeout_seconds=settings.ollama_timeout_seconds,
+        )
+        if settings.ai_classification_enabled
+        else None
+    )
+    classification_service = (
+        CaseClassificationService(
+            case_repository=repository,
+            classification_repository=classification_repository,
+            storage_reader=storage,
+            classifier=case_classifier,
+            max_input_chars=settings.ai_classification_max_input_chars,
+        )
+        if case_classifier is not None
+        else None
     )
     watch_folder = WatchFolder(
         watch_directory=settings.incoming_directory,
@@ -190,6 +240,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         raise ValueError(msg)
 
     mail_import_lock = Lock()
+    classification_lock = Lock()
     mail_import_poller: MailImportPoller | None = None
     if settings.imap_polling_enabled and mail_import_service is not None:
         mail_import_poller = MailImportPoller(
@@ -212,6 +263,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             watch_folder.stop()
             if imported_mail_repository is not None:
                 imported_mail_repository.close()
+            classification_repository.close()
             repository.close()
             import_repository.close()
             number_provider.close()
@@ -220,6 +272,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     app.state.mail_import_service = mail_import_service
     app.state.mail_import_lock = mail_import_lock
     app.state.mail_import_poller = mail_import_poller
+    app.state.classification_service = classification_service
+    app.state.classification_lock = classification_lock
+    app.state.ai_classification_enabled = settings.ai_classification_enabled
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:
@@ -266,6 +321,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         workspace = workspace_service.get_case_workspace(
             case_id,
             extraction_message=_build_extraction_message(request),
+            classification_message=_build_classification_message(request),
         )
         if workspace is None:
             raise HTTPException(status_code=404)
@@ -275,8 +331,43 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             {
                 "page_title": workspace.case_reference,
                 "workspace": workspace,
+                "classification_enabled": request.app.state.ai_classification_enabled,
             },
         )
+
+    @app.post("/cases/{case_id}/classify")
+    def classify_case(case_id: str, request: Request, force: bool = False) -> Response:
+        classification_service = request.app.state.classification_service
+        if classification_service is None:
+            return PlainTextResponse("AI classification is not configured", status_code=503)
+
+        try:
+            identifier = Identifier.from_string(case_id)
+        except ValueError:
+            raise HTTPException(status_code=404) from None
+
+        classification_lock = request.app.state.classification_lock
+        if not classification_lock.acquire(blocking=False):
+            return RedirectResponse(url=f"/cases/{case_id}?classification_busy=1", status_code=303)
+
+        try:
+            result = classification_service.classify_case(identifier, force=force)
+        except CaseClassificationError:
+            logger.exception("Case classification failed: case_id=%s", case_id)
+            return RedirectResponse(url=f"/cases/{case_id}?classification_error=1", status_code=303)
+        except Exception:
+            logger.exception("Case classification failed: case_id=%s", case_id)
+            return RedirectResponse(url=f"/cases/{case_id}?classification_error=1", status_code=303)
+        finally:
+            classification_lock.release()
+
+        if result is None:
+            raise HTTPException(status_code=404)
+        if result.skipped and result.reason == "already_classified":
+            return RedirectResponse(url=f"/cases/{case_id}?classification_skipped=1", status_code=303)
+        if result.skipped and result.reason == "no_text":
+            return RedirectResponse(url=f"/cases/{case_id}?classification_no_text=1", status_code=303)
+        return RedirectResponse(url=f"/cases/{case_id}?classification_success=1", status_code=303)
 
     @app.post("/cases/{case_id}/extract-documents")
     def extract_documents(case_id: str) -> Response:

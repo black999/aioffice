@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
-from typing import BinaryIO
 from dataclasses import dataclass
+from typing import BinaryIO
 
-from aioffice.application import ArtifactRecord, CaseRepository, DownloadableArtifact
+from aioffice.application import (
+    ArtifactRecord,
+    CaseClassificationRepository,
+    CaseRepository,
+    DownloadableArtifact,
+    format_case_category_label,
+    format_confidence_percent,
+)
 from aioffice.application.case_numbers import format_case_reference
 from aioffice.application.storage import ArtifactNotFoundError, ArtifactStorageReader, UnsupportedStorageError
 from aioffice.domain import ArtifactType, Identifier
@@ -35,6 +42,17 @@ class HistoryEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class ClassificationSummary:
+    """Read model for a persisted case classification."""
+
+    category_label: str
+    confidence_percent: str
+    model_name: str
+    classified_at: str
+    rationale: str
+
+
+@dataclass(frozen=True, slots=True)
 class CaseWorkspace:
     """Read model for the case workspace view."""
 
@@ -46,6 +64,8 @@ class CaseWorkspace:
     email_body_truncated: bool
     email_body_error: bool
     extraction_message: str | None
+    classification: ClassificationSummary | None
+    classification_message: str | None
     artifacts: tuple[ArtifactSummary, ...]
     history: tuple[HistoryEntry, ...]
 
@@ -56,6 +76,7 @@ class CaseWorkspaceService:
 
     repository: CaseRepository
     storage_reader: ArtifactStorageReader
+    classification_repository: CaseClassificationRepository | None = None
     email_body_max_bytes: int = 1024 * 1024
 
     def get_case_workspace(
@@ -63,6 +84,7 @@ class CaseWorkspaceService:
         case_id: str,
         *,
         extraction_message: str | None = None,
+        classification_message: str | None = None,
     ) -> CaseWorkspace | None:
         """Return the workspace read model for a case UUID."""
 
@@ -95,6 +117,11 @@ class CaseWorkspaceService:
         history = (
             HistoryEntry(title="Imported", timestamp=persisted_case.created_at),
         )
+        persisted_classification = (
+            self.classification_repository.get(identifier)
+            if self.classification_repository is not None
+            else None
+        )
         return CaseWorkspace(
             case_id=str(persisted_case.case.id),
             case_reference=format_case_reference(persisted_case.reference_number),
@@ -104,6 +131,18 @@ class CaseWorkspaceService:
             email_body_truncated=email_body_truncated,
             email_body_error=email_body_error,
             extraction_message=extraction_message,
+            classification=(
+                ClassificationSummary(
+                    category_label=format_case_category_label(persisted_classification.category),
+                    confidence_percent=format_confidence_percent(persisted_classification.confidence),
+                    model_name=persisted_classification.model_name,
+                    classified_at=persisted_classification.classified_at,
+                    rationale=persisted_classification.rationale,
+                )
+                if persisted_classification is not None
+                else None
+            ),
+            classification_message=classification_message,
             artifacts=artifacts,
             history=history,
         )

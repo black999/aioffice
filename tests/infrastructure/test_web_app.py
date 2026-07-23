@@ -10,12 +10,21 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from aioffice.application import ArtifactRecord, DocumentExtractionResult, MailImportResult
+from aioffice.application import (
+    ArtifactRecord,
+    CaseCategory,
+    CaseClassificationError,
+    CaseClassificationResult,
+    DocumentExtractionResult,
+    MailImportResult,
+    PersistedCaseClassification,
+)
 from aioffice.domain import Artifact, ArtifactType, Case, Identifier, StorageReference
 from aioffice.infrastructure import (
     AppSettings,
     MailImportPoller,
     MailPollStatus,
+    SQLiteCaseClassificationRepository,
     SQLiteCaseNumberProvider,
     SQLiteCaseRepository,
 )
@@ -57,6 +66,21 @@ class _FakePoller:
         return self.status
 
 
+@dataclass(slots=True)
+class _FakeClassificationService:
+    result: CaseClassificationResult | None = None
+    exception: Exception | None = None
+    calls: int = 0
+    seen_force: bool | None = None
+
+    def classify_case(self, case_id: Identifier, *, force: bool = False) -> CaseClassificationResult | None:
+        self.calls += 1
+        self.seen_force = force
+        if self.exception is not None:
+            raise self.exception
+        return self.result
+
+
 def _settings(
     tmp_path: Path,
     *,
@@ -64,6 +88,7 @@ def _settings(
     polling_enabled: bool = False,
     polling_interval_seconds: int = 300,
     polling_run_immediately: bool = False,
+    ai_classification_enabled: bool = False,
 ) -> AppSettings:
     return AppSettings(
         data_directory=tmp_path / "configured-data",
@@ -79,6 +104,7 @@ def _settings(
         imap_polling_enabled=polling_enabled,
         imap_polling_interval_seconds=polling_interval_seconds,
         imap_polling_run_immediately=polling_run_immediately,
+        ai_classification_enabled=ai_classification_enabled,
     )
 
 
@@ -121,6 +147,12 @@ def _write_artifact(root_directory: Path, locator: str, content: bytes) -> None:
     artifact_path.write_bytes(content)
 
 
+def _save_classification(database_path: Path, classification: PersistedCaseClassification) -> None:
+    repository = SQLiteCaseClassificationRepository(database_path=database_path)
+    repository.save(classification)
+    repository.close()
+
+
 def test_get_root_returns_http_200_and_displays_cases(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     _save_case(settings.database_path)
@@ -132,6 +164,39 @@ def test_get_root_returns_http_200_and_displays_cases(tmp_path: Path) -> None:
     assert "AI Office" in response.text
     assert "Number of Cases" in response.text
     assert '<a href="/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"><code>CASE-000001</code></a>' in response.text
+
+
+def test_dashboard_shows_case_category_label_when_classification_exists(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _save_case(settings.database_path)
+    _save_classification(
+        settings.database_path,
+        PersistedCaseClassification(
+            case_id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            category=CaseCategory.INVOICE,
+            confidence=0.92,
+            rationale="Dotyczy faktury.",
+            model_name="qwen2.5:7b",
+            classified_at="2026-07-23T12:00:00+00:00",
+        ),
+    )
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Faktura / rozliczenie" in response.text
+
+
+def test_dashboard_shows_dash_when_classification_is_missing(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _save_case(settings.database_path)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert "—" in response.text
 
 
 def test_dashboard_shows_import_button_when_imap_service_exists(tmp_path: Path) -> None:
@@ -574,6 +639,59 @@ def test_case_workspace_shows_extract_button(tmp_path: Path) -> None:
     assert "Wyodrębnij tekst z dokumentów" in response.text
 
 
+def test_case_workspace_shows_neutral_message_when_ai_classification_is_disabled(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _save_case(settings.database_path)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    assert response.status_code == 200
+    assert "Klasyfikacja AI nie jest skonfigurowana." in response.text
+    assert "Klasyfikuj sprawę" not in response.text
+
+
+def test_case_workspace_shows_classification_button_when_enabled_without_result(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, ai_classification_enabled=True)
+    _save_case(settings.database_path)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    assert response.status_code == 200
+    assert "Sprawa nie została jeszcze sklasyfikowana." in response.text
+    assert 'action="/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/classify"' in response.text
+    assert "Klasyfikuj sprawę" in response.text
+
+
+def test_case_workspace_shows_persisted_classification_details(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, ai_classification_enabled=True)
+    _save_case(settings.database_path)
+    _save_classification(
+        settings.database_path,
+        PersistedCaseClassification(
+            case_id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            category=CaseCategory.INVOICE,
+            confidence=0.9234,
+            rationale="<b>Dokument dotyczy pĹ‚atnoĹ›ci.</b>",
+            model_name="qwen2.5:7b",
+            classified_at="2026-07-23T12:34:56+00:00",
+        ),
+    )
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+    assert response.status_code == 200
+    assert "Faktura / rozliczenie" in response.text
+    assert "92%" in response.text
+    assert "qwen2.5:7b" in response.text
+    assert "2026-07-23T12:34:56+00:00" in response.text
+    assert "&lt;b&gt;Dokument dotyczy pĹ‚atnoĹ›ci.&lt;/b&gt;" in response.text
+    assert "<b>Dokument dotyczy pĹ‚atnoĹ›ci.</b>" not in response.text
+    assert "Klasyfikuj ponownie" in response.text
+
+
 def test_case_workspace_shows_extraction_success_message(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     _save_case(settings.database_path)
@@ -974,3 +1092,254 @@ def test_manual_import_returns_busy_while_automatic_import_holds_lock(tmp_path: 
 
     assert response.status_code == 303
     assert response.headers["location"] == "/?mail_import_busy=1"
+
+
+def test_classify_case_returns_503_without_configuration(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _save_case(settings.database_path)
+
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/classify",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 503
+    assert response.text == "AI classification is not configured"
+
+
+def test_classify_case_returns_404_for_invalid_identifier(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, ai_classification_enabled=True)
+    app = create_app(settings)
+    app.state.classification_service = _FakeClassificationService()
+
+    with TestClient(app) as client:
+        response = client.post("/cases/not-a-uuid/classify", follow_redirects=False)
+
+    assert response.status_code == 404
+
+
+def test_classify_case_returns_404_for_missing_case(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, ai_classification_enabled=True)
+    app = create_app(settings)
+    app.state.classification_service = _FakeClassificationService(result=None)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/classify",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 404
+
+
+def test_classify_case_redirects_with_success(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, ai_classification_enabled=True)
+    _save_case(settings.database_path)
+    app = create_app(settings)
+    app.state.classification_service = _FakeClassificationService(
+        result=CaseClassificationResult(
+            classification=PersistedCaseClassification(
+                case_id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+                category=CaseCategory.INVOICE,
+                confidence=0.92,
+                rationale="Dotyczy faktury.",
+                model_name="qwen2.5:7b",
+                classified_at="2026-07-23T12:00:00+00:00",
+            ),
+            skipped=False,
+            reason=None,
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/classify",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa?classification_success=1"
+
+
+def test_classify_case_redirects_when_already_classified(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, ai_classification_enabled=True)
+    _save_case(settings.database_path)
+    app = create_app(settings)
+    app.state.classification_service = _FakeClassificationService(
+        result=CaseClassificationResult(
+            classification=PersistedCaseClassification(
+                case_id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+                category=CaseCategory.REQUEST,
+                confidence=0.8,
+                rationale="IstniejÄ…cy wynik.",
+                model_name="qwen2.5:7b",
+                classified_at="2026-07-23T12:00:00+00:00",
+            ),
+            skipped=True,
+            reason="already_classified",
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/classify",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa?classification_skipped=1"
+
+
+def test_classify_case_force_reclassification_uses_force_flag(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, ai_classification_enabled=True)
+    _save_case(settings.database_path)
+    app = create_app(settings)
+    fake_service = _FakeClassificationService(
+        result=CaseClassificationResult(
+            classification=PersistedCaseClassification(
+                case_id=Identifier.from_string("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+                category=CaseCategory.REQUEST,
+                confidence=0.8,
+                rationale="Nowy wynik.",
+                model_name="qwen2.5:7b",
+                classified_at="2026-07-23T12:00:00+00:00",
+            ),
+            skipped=False,
+            reason=None,
+        )
+    )
+    app.state.classification_service = fake_service
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/classify?force=true",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert fake_service.seen_force is True
+
+
+def test_classify_case_redirects_when_no_text_is_available(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, ai_classification_enabled=True)
+    _save_case(settings.database_path)
+    app = create_app(settings)
+    app.state.classification_service = _FakeClassificationService(
+        result=CaseClassificationResult(
+            classification=None,
+            skipped=True,
+            reason="no_text",
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/classify",
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa?classification_no_text=1"
+
+
+def test_classify_case_redirects_with_generic_error_on_model_failure(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = _settings(tmp_path, ai_classification_enabled=True)
+    _save_case(settings.database_path)
+    app = create_app(settings)
+    app.state.classification_service = _FakeClassificationService(
+        exception=CaseClassificationError("secret model failure")
+    )
+
+    with TestClient(app) as client, caplog.at_level("ERROR"):
+        response = client.post(
+            "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/classify",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert "Nie udało się sklasyfikować sprawy." in response.text
+    assert "secret model failure" not in response.text
+    assert "Case classification failed" in caplog.text
+
+
+def test_classify_case_hides_unexpected_exception_from_response(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, ai_classification_enabled=True)
+    _save_case(settings.database_path)
+    app = create_app(settings)
+    app.state.classification_service = _FakeClassificationService(
+        exception=RuntimeError("secret raw exception")
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/classify",
+            follow_redirects=True,
+        )
+
+    assert response.status_code == 200
+    assert "Nie udało się sklasyfikować sprawy." in response.text
+    assert "secret raw exception" not in response.text
+
+
+def test_classify_case_redirects_when_classification_lock_is_held(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, ai_classification_enabled=True)
+    _save_case(settings.database_path)
+    app = create_app(settings)
+    app.state.classification_service = _FakeClassificationService()
+
+    with TestClient(app) as client:
+        acquired = app.state.classification_lock.acquire(blocking=False)
+        assert acquired is True
+        try:
+            response = client.post(
+                "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/classify",
+                follow_redirects=False,
+            )
+        finally:
+            app.state.classification_lock.release()
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa?classification_busy=1"
+
+
+def test_classify_case_releases_lock_after_success(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, ai_classification_enabled=True)
+    _save_case(settings.database_path)
+    app = create_app(settings)
+    app.state.classification_service = _FakeClassificationService(
+        result=CaseClassificationResult(classification=None, skipped=True, reason="no_text")
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/classify",
+            follow_redirects=False,
+        )
+        reacquired = app.state.classification_lock.acquire(blocking=False)
+        assert reacquired is True
+        app.state.classification_lock.release()
+
+    assert response.status_code == 303
+
+
+def test_classify_case_releases_lock_after_exception(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, ai_classification_enabled=True)
+    _save_case(settings.database_path)
+    app = create_app(settings)
+    app.state.classification_service = _FakeClassificationService(exception=RuntimeError("boom"))
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/classify",
+            follow_redirects=False,
+        )
+        reacquired = app.state.classification_lock.acquire(blocking=False)
+        assert reacquired is True
+        app.state.classification_lock.release()
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa?classification_error=1"

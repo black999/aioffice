@@ -89,4 +89,21 @@
 - Extracted text can be truncated to the configured output limit.
 - A failed repository save can leave an orphaned content-addressed text file in storage.
 
+## Manual AI classification
+
+- Classification is probabilistic and requires user verification.
+- No automatic action is triggered from the assigned category.
+- Only the latest classification is stored; there is no history yet.
+- Prompt versions are not tracked yet.
+- Model versions are only tracked by the configured model name.
+- Batch classification is not implemented.
+- Automatic classification after import is not implemented.
+- There is no background queue; classification runs synchronously in the HTTP request.
+- The only runtime bound for the model call is the HTTP timeout.
+- The classification lock works only inside a single process.
+- Multiple application workers could still classify different cases in parallel.
+- The classification endpoint has no authentication yet.
+- A local Ollama operator can access document content processed by the model.
+- External Ollama endpoints should not be used for confidential data.
+
 No architectural change proposed.
