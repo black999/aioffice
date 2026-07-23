@@ -1,2 +1,0 @@
-[console_scripts]
-aioffice = aioffice.__main__:main
