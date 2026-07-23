@@ -11,8 +11,21 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from aioffice.application import CaseFactory
-from aioffice.application.services import CaseDashboardService, CaseWorkspaceService, DocumentImportService
-from aioffice.infrastructure import AppSettings, FilesystemStorage, SQLiteCaseNumberProvider, SQLiteCaseRepository, WatchFolder
+from aioffice.application.services import (
+    CaseDashboardService,
+    CaseWorkspaceService,
+    DocumentImportService,
+    MailImportService,
+)
+from aioffice.infrastructure import (
+    AppSettings,
+    FilesystemStorage,
+    IMAPMailboxClient,
+    SQLiteCaseNumberProvider,
+    SQLiteCaseRepository,
+    SQLiteImportedMailRepository,
+    WatchFolder,
+)
 
 
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).with_name("templates")))
@@ -42,6 +55,26 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         processed_directory=settings.processed_directory,
         import_service=import_service,
     )
+    imported_mail_repository: SQLiteImportedMailRepository | None = None
+    mail_import_service: MailImportService | None = None
+    if settings.imap_host is not None and settings.imap_username is not None:
+        imported_mail_repository = SQLiteImportedMailRepository(database_path=settings.database_path)
+        mailbox_client = IMAPMailboxClient(
+            host=settings.imap_host,
+            port=settings.imap_port,
+            username=settings.imap_username,
+            password=settings.imap_password or "",
+            mailbox=settings.imap_mailbox,
+            use_ssl=settings.imap_use_ssl,
+        )
+        mail_import_service = MailImportService(
+            mailbox_client=mailbox_client,
+            imported_mail_repository=imported_mail_repository,
+            storage=storage,
+            case_factory=CaseFactory(),
+            case_repository=import_repository,
+            case_number_provider=number_provider,
+        )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -53,8 +86,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             repository.close()
             import_repository.close()
             number_provider.close()
+            if imported_mail_repository is not None:
+                imported_mail_repository.close()
 
     app = FastAPI(title="AI Office", lifespan=lifespan)
+    app.state.mail_import_service = mail_import_service
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request) -> HTMLResponse:

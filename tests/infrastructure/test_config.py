@@ -9,6 +9,12 @@ def test_app_settings_uses_default_values(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.delenv("AIOFFICE_DATA_DIR", raising=False)
     monkeypatch.delenv("AIOFFICE_HOST", raising=False)
     monkeypatch.delenv("AIOFFICE_PORT", raising=False)
+    monkeypatch.delenv("AIOFFICE_IMAP_HOST", raising=False)
+    monkeypatch.delenv("AIOFFICE_IMAP_PORT", raising=False)
+    monkeypatch.delenv("AIOFFICE_IMAP_USERNAME", raising=False)
+    monkeypatch.delenv("AIOFFICE_IMAP_PASSWORD", raising=False)
+    monkeypatch.delenv("AIOFFICE_IMAP_MAILBOX", raising=False)
+    monkeypatch.delenv("AIOFFICE_IMAP_USE_SSL", raising=False)
 
     settings = AppSettings.from_environment()
 
@@ -19,18 +25,36 @@ def test_app_settings_uses_default_values(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.processed_directory == settings.data_directory / "processed"
     assert settings.host == "127.0.0.1"
     assert settings.port == 8000
+    assert settings.imap_host is None
+    assert settings.imap_port == 993
+    assert settings.imap_username is None
+    assert settings.imap_password is None
+    assert settings.imap_mailbox == "INBOX"
+    assert settings.imap_use_ssl is True
 
 
 def test_app_settings_reads_all_environment_variables(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("AIOFFICE_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("AIOFFICE_HOST", "0.0.0.0")
     monkeypatch.setenv("AIOFFICE_PORT", "9000")
+    monkeypatch.setenv("AIOFFICE_IMAP_HOST", "imap.example.com")
+    monkeypatch.setenv("AIOFFICE_IMAP_PORT", "1993")
+    monkeypatch.setenv("AIOFFICE_IMAP_USERNAME", "user@example.com")
+    monkeypatch.setenv("AIOFFICE_IMAP_PASSWORD", "secret")
+    monkeypatch.setenv("AIOFFICE_IMAP_MAILBOX", "Support")
+    monkeypatch.setenv("AIOFFICE_IMAP_USE_SSL", "false")
 
     settings = AppSettings.from_environment()
 
     assert settings.data_directory == (tmp_path / "data").resolve()
     assert settings.host == "0.0.0.0"
     assert settings.port == 9000
+    assert settings.imap_host == "imap.example.com"
+    assert settings.imap_port == 1993
+    assert settings.imap_username == "user@example.com"
+    assert settings.imap_password == "secret"
+    assert settings.imap_mailbox == "Support"
+    assert settings.imap_use_ssl is False
 
 
 def test_app_settings_expands_home_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -102,4 +126,18 @@ def test_app_settings_rejects_port_above_range(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("AIOFFICE_PORT", "65536")
 
     with pytest.raises(ValueError, match="AIOFFICE_PORT must be between 1 and 65535"):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_non_numeric_imap_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_PORT", "abc")
+
+    with pytest.raises(ValueError, match="AIOFFICE_IMAP_PORT must be an integer"):
+        AppSettings.from_environment()
+
+
+def test_app_settings_rejects_invalid_imap_ssl_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOFFICE_IMAP_USE_SSL", "maybe")
+
+    with pytest.raises(ValueError, match="AIOFFICE_IMAP_USE_SSL must be 'true' or 'false'"):
         AppSettings.from_environment()

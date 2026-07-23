@@ -42,4 +42,14 @@
 - Files in `processed` are not cleaned up automatically.
 - Dashboard updates still require a manual refresh.
 
+## IMAP import
+
+- IMAP import is not started automatically yet.
+- OAuth2 is not supported yet.
+- Multiple accounts are not supported yet.
+- Attachments are not imported as separate artifacts yet.
+- Automatic replies are not implemented.
+- Imported messages are not moved to another folder after import.
+- The IMAP password is currently passed through an environment variable.
+
 No architectural change proposed.

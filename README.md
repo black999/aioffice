@@ -64,3 +64,16 @@ In another terminal:
 ```bash
 cp przykladowy.pdf /home/irek/aioffice-data/incoming/
 ```
+
+## IMAP configuration
+
+```bash
+export AIOFFICE_IMAP_HOST=imap.example.com
+export AIOFFICE_IMAP_PORT=993
+export AIOFFICE_IMAP_USERNAME=user@example.com
+export AIOFFICE_IMAP_PASSWORD='secret'
+export AIOFFICE_IMAP_MAILBOX=INBOX
+export AIOFFICE_IMAP_USE_SSL=true
+```
+
+Use a proper secret store for the IMAP password in production. Environment variables are only a temporary MVP mechanism.
