@@ -110,7 +110,7 @@ def _build_extraction_message(request: Request) -> str | None:
     if extracted is None or skipped is None or failed is None:
         return None
     if extracted == 0 and failed == 0 and skipped > 0:
-        return f"Nie znaleziono tekstu do wyodrębnienia. Pominięto: {skipped}."
+        return f"Tekst został już wcześniej wyodrębniony. Pominięto: {skipped}."
     return (
         "Ekstrakcja zakończona. "
         f"Wyodrębniono: {extracted}, pominięto: {skipped}, błędy: {failed}."

@@ -711,7 +711,7 @@ def test_case_workspace_shows_no_text_message(tmp_path: Path) -> None:
         response = client.get("/cases/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa?extracted=0&skipped=1&failed=0")
 
     assert response.status_code == 200
-    assert "Nie znaleziono tekstu do wyodrębnienia. Pominięto: 1." in response.text
+    assert "Tekst został już wcześniej wyodrębniony. Pominięto: 1." in response.text
 
 
 def test_case_workspace_shows_generated_text_metadata(tmp_path: Path) -> None:
