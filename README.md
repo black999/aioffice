@@ -77,3 +77,12 @@ export AIOFFICE_IMAP_USE_SSL=true
 ```
 
 Use a proper secret store for the IMAP password in production. Environment variables are only a temporary MVP mechanism.
+
+## Manual IMAP import
+
+1. Configure the IMAP environment variables.
+2. Start the application with `uv run aioffice`.
+3. Open the dashboard in your browser.
+4. Click `Importuj pocztę`.
+
+The IMAP import is currently manual and synchronous. The HTTP request stays open until the import finishes.

@@ -110,6 +110,7 @@ def test_runtime_deduplicates_identical_documents_by_content(tmp_path: Path) -> 
             return "CASE-000002" in response.text and "Number of Cases:</strong> 2" in response.text
 
         wait_until(second_case_visible)
+        wait_until(lambda: (settings.processed_directory / "second.pdf").exists())
 
         dashboard = client.get("/")
 

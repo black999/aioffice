@@ -12,6 +12,20 @@
         <h1>{{ page_title }}</h1>
         <p><strong>Number of Cases:</strong> {{ case_count }}</p>
 
+        <section>
+            <h2>Mail Import</h2>
+            {% if mail_import_message %}
+            <p><mark>{{ mail_import_message }}</mark></p>
+            {% endif %}
+            {% if mail_import_available %}
+            <form method="post" action="/admin/import-mail">
+                <button type="submit">Importuj pocztę</button>
+            </form>
+            {% else %}
+            <p>Import IMAP nie jest skonfigurowany.</p>
+            {% endif %}
+        </section>
+
         <table>
             <thead>
                 <tr>

@@ -44,7 +44,11 @@
 
 ## IMAP import
 
+- IMAP import can now be started manually from the dashboard.
 - IMAP import is not started automatically yet.
+- There is no automatic polling or scheduler yet.
+- The HTTP request remains open until a manual IMAP import finishes.
+- The import lock protects only a single application process instance.
 - OAuth2 is not supported yet.
 - Multiple accounts are not supported yet.
 - Attachments are not imported as separate artifacts yet.
